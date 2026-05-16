@@ -1,0 +1,197 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String    @id @default(uuid())
+  phone        String    @unique
+  passwordHash String
+  name         String
+  kycStatus    KycStatus @default(PENDING)
+  role         Role      @default(USER)
+  referralCode String    @unique
+  referredById String?
+  referredBy   User?     @relation("Referrals", fields: [referredById], references: [id])
+  referrals    User[]    @relation("Referrals")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  wallet             Wallet?
+  userPlans          UserPlan[]
+  transactions       Transaction[]
+  paymentSubmissions PaymentSubmission[]
+  withdrawalRequests WithdrawalRequest[]
+  spinLogs           SpinLog[]
+  referralsMade      Referral[]    @relation("ReferrerReferrals")
+  referralsReceived  Referral[]    @relation("RefereeReferrals")
+  refreshTokens      RefreshToken[]
+}
+
+enum KycStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model Wallet {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id])
+  balance        Float    @default(0)
+  locked         Float    @default(0)
+  available      Float    @default(0)
+  earnedToday    Float    @default(0)
+  earnedThisWeek Float    @default(0)
+  totalEarned    Float    @default(0)
+  updatedAt      DateTime @updatedAt
+}
+
+model Plan {
+  id           String     @id
+  name         String
+  price        Float
+  dailyEarning Float
+  duration     Int
+  color        String
+  badge        String?
+  upcoming     Boolean    @default(false)
+  description  String
+  userPlans    UserPlan[]
+}
+
+model UserPlan {
+  id            String     @id @default(uuid())
+  userId        String
+  planId        String
+  user          User       @relation(fields: [userId], references: [id])
+  plan          Plan       @relation(fields: [planId], references: [id])
+  startDate     DateTime   @default(now())
+  daysCompleted Int        @default(0)
+  lockedAmount  Float
+  status        PlanStatus @default(ACTIVE)
+  createdAt     DateTime   @default(now())
+}
+
+enum PlanStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model Transaction {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  type        TxnType
+  amount      Float
+  label       String
+  description String
+  status      TxnStatus @default(COMPLETED)
+  createdAt   DateTime  @default(now())
+}
+
+enum TxnType {
+  CREDIT
+  DEBIT
+}
+
+enum TxnStatus {
+  COMPLETED
+  PENDING
+  FAILED
+}
+
+model PaymentMethod {
+  id          String        @id @default(uuid())
+  type        PaymentType
+  details     Json
+  isActive    Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  submissions PaymentSubmission[]
+}
+
+enum PaymentType {
+  UPI
+  BANK
+  USDT
+}
+
+model PaymentSubmission {
+  id            String           @id @default(uuid())
+  userId        String
+  user          User             @relation(fields: [userId], references: [id])
+  methodId      String
+  method        PaymentMethod    @relation(fields: [methodId], references: [id])
+  amount        Float
+  txnId         String           @unique
+  txnHash       String?
+  screenshotUrl String?
+  status        SubmissionStatus @default(PENDING)
+  createdAt     DateTime         @default(now())
+  verifiedAt    DateTime?
+}
+
+enum SubmissionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model WithdrawalRequest {
+  id            String           @id @default(uuid())
+  userId        String
+  user          User             @relation(fields: [userId], references: [id])
+  amount        Float
+  accountNumber String
+  ifsc          String
+  accountName   String
+  status        WithdrawalStatus @default(PENDING)
+  createdAt     DateTime         @default(now())
+  completedAt   DateTime?
+}
+
+enum WithdrawalStatus {
+  PENDING
+  COMPLETED
+  REJECTED
+}
+
+model SpinLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  prize     String
+  value     Float
+  createdAt DateTime @default(now())
+}
+
+model Referral {
+  id            String   @id @default(uuid())
+  referrerId    String
+  refereeId     String
+  planId        String
+  earningAmount Float
+  level         Int      @default(1)
+  referrer      User     @relation("ReferrerReferrals", fields: [referrerId], references: [id])
+  referee       User     @relation("RefereeReferrals", fields: [refereeId], references: [id])
+  createdAt     DateTime @default(now())
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
