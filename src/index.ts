@@ -12,6 +12,7 @@ import withdrawalRouter from './routes/withdrawal';
 import spinRouter from './routes/spin';
 import teamRouter from './routes/team';
 import adminRouter from './routes/admin';
+import supportRouter from './routes/support';
 
 import { errorHandler } from './middleware/errorHandler';
 import { startCronJobs } from './services/cronService';
@@ -37,6 +38,7 @@ app.use('/v1/withdrawal', withdrawalRouter);
 app.use('/v1/spin', spinRouter);
 app.use('/v1/team', teamRouter);
 app.use('/v1/admin', adminRouter);
+app.use('/v1/support', supportRouter);
 
 // 404
 app.use((_, res) => {
@@ -48,9 +50,7 @@ app.use(errorHandler);
 
 app.listen(PORT, () => {
   console.log(`[Server] Running on port ${PORT} (${process.env.NODE_ENV})`);
-  if (process.env.NODE_ENV === 'production') {
-    startCronJobs();
-  }
+  startCronJobs();
 });
 
 export default app;

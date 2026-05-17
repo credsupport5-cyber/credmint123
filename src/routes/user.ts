@@ -76,11 +76,16 @@ router.get('/getUserDetails', async (req: Request, res: Response, next: NextFunc
       ? {
           planId: userPlan.planId,
           planName: userPlan.plan.name,
+          tier: userPlan.plan.tier,
+          level: userPlan.plan.level,
           daysCurrent: userPlan.daysCompleted,
           totalDays: userPlan.plan.duration,
           totalLocked: userPlan.lockedAmount,
           startDate: userPlan.startDate,
           dailyEarning: userPlan.plan.dailyEarning,
+          spinAmounts: userPlan.plan.spinAmounts,
+          spinTotal: userPlan.plan.spinTotal,
+          totalDailyEarning: userPlan.plan.totalDailyEarning,
           earnedSoFar: userPlan.daysCompleted * userPlan.plan.dailyEarning,
           status: userPlan.status,
         }
@@ -102,14 +107,18 @@ router.get('/getUserDetails', async (req: Request, res: Response, next: NextFunc
       allPlans: plans.map((p) => ({
         id: p.id,
         name: p.name,
+        tier: p.tier,
+        level: p.level,
         price: p.price,
         dailyEarning: p.dailyEarning,
+        spinAmounts: p.spinAmounts,
+        spinTotal: p.spinTotal,
+        totalDailyEarning: p.totalDailyEarning,
         duration: p.duration,
         color: p.color,
         badge: p.badge,
         upcoming: p.upcoming,
         description: p.description,
-        totalReturn: p.dailyEarning * p.duration,
       })),
     });
   } catch (err) {

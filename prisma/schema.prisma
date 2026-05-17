@@ -30,6 +30,7 @@ model User {
   referralsMade      Referral[]    @relation("ReferrerReferrals")
   referralsReceived  Referral[]    @relation("RefereeReferrals")
   refreshTokens      RefreshToken[]
+  supportTickets     SupportTicket[]
 }
 
 enum KycStatus {
@@ -56,17 +57,29 @@ model Wallet {
   updatedAt      DateTime @updatedAt
 }
 
+enum PlanTier {
+  SILVER
+  GOLD
+  DIAMOND
+  PLATINUM
+}
+
 model Plan {
-  id           String     @id
-  name         String
-  price        Float
-  dailyEarning Float
-  duration     Int
-  color        String
-  badge        String?
-  upcoming     Boolean    @default(false)
-  description  String
-  userPlans    UserPlan[]
+  id                String     @id
+  name              String
+  tier              PlanTier   @default(SILVER)
+  level             Int        @default(1)
+  price             Float
+  dailyEarning      Float
+  spinAmounts       Float[]    @default([])
+  spinTotal         Float      @default(0)
+  totalDailyEarning Float      @default(0)
+  duration          Int
+  color             String
+  badge             String?
+  upcoming          Boolean    @default(false)
+  description       String
+  userPlans         UserPlan[]
 }
 
 model UserPlan {
@@ -194,4 +207,22 @@ model RefreshToken {
   token     String   @unique
   expiresAt DateTime
   createdAt DateTime @default(now())
+}
+
+model SupportTicket {
+  id          String              @id @default(uuid())
+  userId      String
+  user        User                @relation(fields: [userId], references: [id])
+  name        String
+  description String
+  status      SupportTicketStatus @default(OPEN)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
 }

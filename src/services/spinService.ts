@@ -17,10 +17,11 @@ const SPIN_PRIZES = [
   { label: 'Try Again', value: 0, isTryAgain: true },
 ];
 
-export const SPINS_PER_PLAN: Record<string, number> = {
-  silver: 5,
-  gold: 10,
-  diamond: 15,
+export const SPINS_PER_TIER: Record<string, number> = {
+  SILVER: 5,
+  GOLD: 10,
+  DIAMOND: 15,
+  PLATINUM: 20,
 };
 
 export function getPrizesConfig() {
@@ -45,7 +46,7 @@ export async function getSpinStatus(prisma: PrismaClient, userId: string) {
     throw new AppError('NO_ACTIVE_PLAN', 'An active plan is required to spin', 403);
   }
 
-  const spinsAllotted = SPINS_PER_PLAN[activePlan.plan.id] ?? 0;
+  const spinsAllotted = SPINS_PER_TIER[activePlan.plan.tier] ?? 0;
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -61,7 +62,7 @@ export async function getSpinStatus(prisma: PrismaClient, userId: string) {
     spinsAllotted,
     spinsUsedToday,
     spinsRemaining: Math.max(0, spinsAllotted - spinsUsedToday),
-    planTier: activePlan.plan.id,
+    planTier: activePlan.plan.tier,
     prizes: getPrizesConfig(),
   };
 }
