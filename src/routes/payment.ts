@@ -3,6 +3,7 @@ import { z } from 'zod';
 import prisma from '../lib/prisma';
 import { authMiddleware } from '../middleware/authMiddleware';
 import { AppError } from '../lib/errors';
+import { appendDepositRow } from '../services/sheetsService';
 
 const router = Router();
 
@@ -36,7 +37,7 @@ router.post('/addFunds', async (req: Request, res: Response, next: NextFunction)
   try {
     const body = z
       .object({
-        amount: z.number().min(100, 'Minimum amount is ₹100'),
+        amount: z.number().min(1, 'Minimum amount is 1 USDT'),
         txnHash: z.string().min(1, 'Transaction hash is required'),
       })
       .parse(req.body);
@@ -62,7 +63,19 @@ router.post('/addFunds', async (req: Request, res: Response, next: NextFunction)
         txnId: body.txnHash,
         txnHash: body.txnHash,
       },
+      include: { user: { select: { name: true, phone: true } } },
     });
+
+    appendDepositRow({
+      id: submission.id,
+      userName: submission.user.name,
+      userPhone: submission.user.phone,
+      amount: submission.amount,
+      txnHash: submission.txnHash ?? submission.txnId,
+      methodType: activeMethod.type,
+      status: submission.status,
+      createdAt: submission.createdAt,
+    }).catch(console.error);
 
     res.status(201).json({
       id: submission.id,

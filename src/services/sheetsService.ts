@@ -2,6 +2,7 @@ import { google } from 'googleapis';
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const SHEET_NAME = 'Withdrawals';
+const DEPOSITS_SHEET_NAME = 'Deposits';
 
 function getAuthClient() {
   const keyJson = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
@@ -57,6 +58,50 @@ export async function appendWithdrawalRow(data: {
     console.log(`[Sheets] Appended withdrawal ${data.id}`);
   } catch (err) {
     console.error('[Sheets] Failed to append row:', err);
+  }
+}
+
+export async function appendDepositRow(data: {
+  id: string;
+  userName: string;
+  userPhone: string;
+  amount: number;
+  txnHash: string;
+  methodType: string;
+  status: string;
+  createdAt: Date;
+}) {
+  if (!SHEET_ID) {
+    console.warn('[Sheets] GOOGLE_SHEET_ID not set — skipping deposit sheet append');
+    return;
+  }
+
+  try {
+    const auth = getAuthClient();
+    const sheets = google.sheets({ version: 'v4', auth });
+
+    const row = [
+      data.id,
+      data.userName,
+      data.userPhone,
+      `₹${data.amount}`,
+      data.txnHash,
+      data.methodType.toUpperCase(),
+      data.status,
+      data.createdAt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+      '',
+    ];
+
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SHEET_ID,
+      range: `${DEPOSITS_SHEET_NAME}!A:I`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [row] },
+    });
+
+    console.log(`[Sheets] Appended deposit ${data.id}`);
+  } catch (err) {
+    console.error('[Sheets] Failed to append deposit row:', err);
   }
 }
 

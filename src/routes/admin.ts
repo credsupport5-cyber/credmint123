@@ -6,6 +6,7 @@ import { adminMiddleware } from '../middleware/adminMiddleware';
 import { AppError } from '../lib/errors';
 import { creditWallet } from '../services/walletService';
 import { updateWithdrawalStatus } from '../services/sheetsService';
+import { fetchUsdtInrRate, applyPlatformFee } from '../services/rateService';
 import { TxnType } from '@prisma/client';
 
 const router = Router();
@@ -103,17 +104,20 @@ router.post('/payment/:id/verify', async (req: Request, res: Response, next: Nex
     }
 
     if (body.action === 'approve') {
+      const usdtRate = await fetchUsdtInrRate();
+      const inrAmount = applyPlatformFee(submission.amount, usdtRate);
+
       await prisma.$transaction(async (tx) => {
         await tx.paymentSubmission.update({
           where: { id },
-          data: { status: 'APPROVED', verifiedAt: new Date() },
+          data: { status: 'APPROVED', verifiedAt: new Date(), inrAmount, usdtRate },
         });
 
         await tx.wallet.update({
           where: { userId: submission.userId },
           data: {
-            balance: { increment: submission.amount },
-            available: { increment: submission.amount },
+            balance: { increment: inrAmount },
+            available: { increment: inrAmount },
           },
         });
 
@@ -121,9 +125,9 @@ router.post('/payment/:id/verify', async (req: Request, res: Response, next: Nex
           data: {
             userId: submission.userId,
             type: TxnType.CREDIT,
-            amount: submission.amount,
+            amount: inrAmount,
             label: 'Deposit',
-            description: `Added via ${submission.txnId}`,
+            description: `${submission.amount} USDT @ ₹${usdtRate.toFixed(2)} (5% fee applied)`,
           },
         });
       });
@@ -136,7 +140,9 @@ router.post('/payment/:id/verify', async (req: Request, res: Response, next: Nex
         submission: { id, status: 'approved' },
         walletCredited: {
           userId: submission.userId,
-          amount: submission.amount,
+          usdtAmount: submission.amount,
+          usdtRate,
+          inrAmount,
           newBalance: updatedWallet?.balance,
         },
       });

@@ -11,35 +11,27 @@ router.use(authMiddleware);
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.userId;
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { referralCode: true },
-    });
 
     const weekStart = new Date();
     weekStart.setDate(weekStart.getDate() - weekStart.getDay());
     weekStart.setHours(0, 0, 0, 0);
 
-    const [referrals, weeklyReferrals, totalEarnings, weeklyEarnings] = await Promise.all([
-      prisma.referral.findMany({
-        where: { referrerId: userId },
-        include: {
-          referee: {
-            select: {
-              name: true,
-              createdAt: true,
-              userPlans: {
-                where: { status: 'ACTIVE' },
-                include: { plan: { select: { name: true } } },
-                take: 1,
-              },
-            },
+    const [user, directSignups, totalEarnings, weeklyEarnings] = await Promise.all([
+      prisma.user.findUnique({ where: { id: userId }, select: { referralCode: true } }),
+      // All users who registered with my referral code (including those without a plan yet)
+      prisma.user.findMany({
+        where: { referredById: userId },
+        select: {
+          id: true,
+          name: true,
+          createdAt: true,
+          userPlans: {
+            where: { status: 'ACTIVE' },
+            include: { plan: { select: { name: true } } },
+            take: 1,
           },
         },
         orderBy: { createdAt: 'desc' },
-      }),
-      prisma.referral.count({
-        where: { referrerId: userId, createdAt: { gte: weekStart } },
       }),
       prisma.referral.aggregate({
         where: { referrerId: userId },
@@ -51,21 +43,30 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       }),
     ]);
 
+    // L1 earnings per direct referee (for per-member display)
+    const l1Referrals = await prisma.referral.findMany({
+      where: { referrerId: userId, level: 1 },
+      select: { refereeId: true, earningAmount: true },
+    });
+    const earningsMap = Object.fromEntries(l1Referrals.map((r) => [r.refereeId, r.earningAmount]));
+
+    const weeklySignups = directSignups.filter((u) => u.createdAt >= weekStart).length;
+
     res.json({
       stats: {
-        totalReferrals: referrals.length,
-        thisWeek: weeklyReferrals,
+        totalReferrals: directSignups.length,
+        thisWeek: weeklySignups,
         totalEarnings: totalEarnings._sum.earningAmount ?? 0,
         weeklyEarnings: weeklyEarnings._sum.earningAmount ?? 0,
       },
       referralCode: user?.referralCode,
-      members: referrals.map((r) => ({
-        id: r.id,
-        name: r.referee.name,
-        joinDate: r.referee.createdAt.toISOString().split('T')[0],
-        plan: r.referee.userPlans[0]?.plan.name ?? 'No active plan',
-        earningsForMe: r.earningAmount,
-        status: r.referee.userPlans.length > 0 ? 'active' : 'inactive',
+      members: directSignups.map((u) => ({
+        id: u.id,
+        name: u.name,
+        joinDate: u.createdAt.toISOString().split('T')[0],
+        plan: u.userPlans[0]?.plan.name ?? 'No active plan',
+        earningsForMe: earningsMap[u.id] ?? 0,
+        status: u.userPlans.length > 0 ? 'active' : 'registered',
       })),
     });
   } catch (err) {

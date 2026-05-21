@@ -146,6 +146,8 @@ model PaymentSubmission {
   methodId      String
   method        PaymentMethod    @relation(fields: [methodId], references: [id])
   amount        Float
+  inrAmount     Float?
+  usdtRate      Float?
   txnId         String           @unique
   txnHash       String?
   screenshotUrl String?
