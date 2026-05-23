@@ -1,21 +1,7 @@
-import cron from 'node-cron';
 import prisma from '../lib/prisma';
 import { TxnType } from '@prisma/client';
 
-export function startCronJobs() {
-  // Daily earnings — midnight IST (UTC+5:30 = 18:30 UTC previous day)
-  cron.schedule('30 18 * * *', runDailyEarnings, { timezone: 'UTC' });
-
-  // Reset earnedToday at midnight IST
-  cron.schedule('30 18 * * *', resetDailyStats, { timezone: 'UTC' });
-
-  // Reset earnedThisWeek at Monday midnight IST
-  cron.schedule('30 18 * * 0', resetWeeklyStats, { timezone: 'UTC' });
-
-  console.log('[Cron] Jobs scheduled');
-}
-
-async function runDailyEarnings() {
+export async function runDailyEarnings() {
   console.log('[Cron] Running daily earnings...');
 
   const activePlans = await prisma.userPlan.findMany({
@@ -93,15 +79,12 @@ async function runDailyEarnings() {
   console.log(`[Cron] Daily earnings done. Credited ${credited}/${activePlans.length} users.`);
 }
 
-async function resetDailyStats() {
+export async function resetDailyStats() {
   await prisma.wallet.updateMany({ data: { earnedToday: 0 } });
-  console.log('[Cron] Reset earnedToday for all wallets');
+  console.log('[Admin] Reset earnedToday for all wallets');
 }
 
-async function resetWeeklyStats() {
+export async function resetWeeklyStats() {
   await prisma.wallet.updateMany({ data: { earnedThisWeek: 0 } });
-  console.log('[Cron] Reset earnedThisWeek for all wallets');
+  console.log('[Admin] Reset earnedThisWeek for all wallets');
 }
-
-// Manual trigger for testing
-export { runDailyEarnings };

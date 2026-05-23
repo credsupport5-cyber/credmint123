@@ -62,18 +62,19 @@ router.post('/:planId/buy', async (req: Request, res: Response, next: NextFuncti
     const { planId } = req.params;
     const userId = req.user!.userId;
 
-    const plan = await prisma.plan.findUnique({ where: { id: planId } });
+    // Single round trip: 3 parallel queries, referrer IDs pre-stored on user row
+    const [plan, wallet, user] = await Promise.all([
+      prisma.plan.findUnique({ where: { id: planId } }),
+      prisma.wallet.findUnique({ where: { userId } }),
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: { name: true, referredById: true, referrerId2: true, referrerId3: true },
+      }),
+    ]);
+
     if (!plan) throw new AppError('PLAN_NOT_FOUND', 'Plan not found', 404);
     if (plan.upcoming) throw new AppError('PLAN_UPCOMING', 'This plan is not yet available', 400);
 
-    const existingPlan = await prisma.userPlan.findFirst({
-      where: { userId, status: 'ACTIVE' },
-    });
-    if (existingPlan) {
-      throw new AppError('ALREADY_HAS_ACTIVE_PLAN', 'Complete your current plan before buying another', 400);
-    }
-
-    const wallet = await prisma.wallet.findUnique({ where: { userId } });
     if (!wallet || wallet.available < plan.price) {
       throw new AppError(
         'INSUFFICIENT_BALANCE',
@@ -81,6 +82,12 @@ router.post('/:planId/buy', async (req: Request, res: Response, next: NextFuncti
         400
       );
     }
+
+    const REFERRAL_RATES = [0.25, 0.10, 0.05];
+    const referrers: Array<{ id: string; earning: number; level: number }> = [];
+    if (user?.referredById) referrers.push({ id: user.referredById, earning: Math.floor(plan.price * REFERRAL_RATES[0]), level: 1 });
+    if (user?.referrerId2)  referrers.push({ id: user.referrerId2,  earning: Math.floor(plan.price * REFERRAL_RATES[1]), level: 2 });
+    if (user?.referrerId3)  referrers.push({ id: user.referrerId3,  earning: Math.floor(plan.price * REFERRAL_RATES[2]), level: 3 });
 
     const result = await prisma.$transaction(async (tx) => {
       await tx.wallet.update({
@@ -106,46 +113,33 @@ router.post('/:planId/buy', async (req: Request, res: Response, next: NextFuncti
         data: { userId, planId: plan.id, lockedAmount: plan.price },
       });
 
-      // 3-level referral walk
-      const buyer = await tx.user.findUnique({ where: { id: userId }, select: { name: true, referredById: true } });
-      const REFERRAL_RATES = [0.25, 0.10, 0.05];
-      let walkId = userId;
-
-      for (let level = 1; level <= 3; level++) {
-        const current = await tx.user.findUnique({ where: { id: walkId }, select: { referredById: true } });
-        if (!current?.referredById) break;
-
-        const referrerId = current.referredById;
-        const earning = Math.floor(plan.price * REFERRAL_RATES[level - 1]);
-
+      for (const ref of referrers) {
         await tx.wallet.update({
-          where: { userId: referrerId },
+          where: { userId: ref.id },
           data: {
-            balance: { increment: earning },
-            available: { increment: earning },
-            totalEarned: { increment: earning },
-            earnedToday: { increment: earning },
-            earnedThisWeek: { increment: earning },
+            balance: { increment: ref.earning },
+            available: { increment: ref.earning },
+            totalEarned: { increment: ref.earning },
+            earnedToday: { increment: ref.earning },
+            earnedThisWeek: { increment: ref.earning },
           },
         });
         await tx.transaction.create({
           data: {
-            userId: referrerId,
+            userId: ref.id,
             type: TxnType.CREDIT,
-            amount: earning,
-            label: `Level ${level} Referral`,
-            description: `${buyer?.name ?? 'Someone'} joined ${plan.name}`,
+            amount: ref.earning,
+            label: `Level ${ref.level} Referral`,
+            description: `${user?.name ?? 'Someone'} joined ${plan.name}`,
           },
         });
         await tx.referral.create({
-          data: { referrerId, refereeId: userId, planId: plan.id, earningAmount: earning, level },
+          data: { referrerId: ref.id, refereeId: userId, planId: plan.id, earningAmount: ref.earning, level: ref.level },
         });
-
-        walkId = referrerId;
       }
 
       return { userPlan, txn };
-    });
+    }, { timeout: 30000 });
 
     const updatedWallet = await prisma.wallet.findUnique({ where: { userId } });
 

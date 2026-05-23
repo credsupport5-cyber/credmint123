@@ -15,7 +15,6 @@ import adminRouter from './routes/admin';
 import supportRouter from './routes/support';
 
 import { errorHandler } from './middleware/errorHandler';
-import { startCronJobs } from './services/cronService';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -50,7 +49,6 @@ app.use(errorHandler);
 
 app.listen(PORT, () => {
   console.log(`[Server] Running on port ${PORT} (${process.env.NODE_ENV})`);
-  startCronJobs();
 });
 
 export default app;

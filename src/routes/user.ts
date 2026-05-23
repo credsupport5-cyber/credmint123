@@ -51,7 +51,7 @@ router.get('/getUserDetails', async (req: Request, res: Response, next: NextFunc
   try {
     const userId = req.user!.userId;
 
-    const [user, wallet, userPlan, plans] = await Promise.all([
+    const [user, wallet, userPlans, plans] = await Promise.all([
       prisma.user.findUnique({
         where: { id: userId },
         select: {
@@ -65,31 +65,30 @@ router.get('/getUserDetails', async (req: Request, res: Response, next: NextFunc
         },
       }),
       prisma.wallet.findUnique({ where: { userId } }),
-      prisma.userPlan.findFirst({
+      prisma.userPlan.findMany({
         where: { userId, status: 'ACTIVE' },
         include: { plan: true },
+        orderBy: { startDate: 'desc' },
       }),
       prisma.plan.findMany({ orderBy: { price: 'asc' } }),
     ]);
 
-    const activePlan = userPlan
-      ? {
-          planId: userPlan.planId,
-          planName: userPlan.plan.name,
-          tier: userPlan.plan.tier,
-          level: userPlan.plan.level,
-          daysCurrent: userPlan.daysCompleted,
-          totalDays: userPlan.plan.duration,
-          totalLocked: userPlan.lockedAmount,
-          startDate: userPlan.startDate,
-          dailyEarning: userPlan.plan.dailyEarning,
-          spinAmounts: userPlan.plan.spinAmounts,
-          spinTotal: userPlan.plan.spinTotal,
-          totalDailyEarning: userPlan.plan.totalDailyEarning,
-          earnedSoFar: userPlan.daysCompleted * userPlan.plan.dailyEarning,
-          status: userPlan.status,
-        }
-      : null;
+    const activePlans = userPlans.map((up) => ({
+      planId: up.planId,
+      planName: up.plan.name,
+      tier: up.plan.tier,
+      level: up.plan.level,
+      daysCurrent: up.daysCompleted,
+      totalDays: up.plan.duration,
+      totalLocked: up.lockedAmount,
+      startDate: up.startDate,
+      dailyEarning: up.plan.dailyEarning,
+      spinAmounts: up.plan.spinAmounts,
+      spinTotal: up.plan.spinTotal,
+      totalDailyEarning: up.plan.totalDailyEarning,
+      earnedSoFar: up.daysCompleted * up.plan.dailyEarning,
+      status: up.status,
+    }));
 
     res.json({
       user,
@@ -103,7 +102,7 @@ router.get('/getUserDetails', async (req: Request, res: Response, next: NextFunc
             totalEarned: wallet.totalEarned,
           }
         : null,
-      activePlan,
+      activePlans,
       allPlans: plans.map((p) => ({
         id: p.id,
         name: p.name,

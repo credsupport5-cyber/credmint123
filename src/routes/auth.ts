@@ -29,9 +29,26 @@ router.post('/register', async (req: Request, res: Response, next: NextFunction)
     if (existing) throw new AppError('PHONE_ALREADY_EXISTS', 'Phone already registered', 409);
 
     let referredById: string | undefined;
+    let referrerId2: string | undefined;
+    let referrerId3: string | undefined;
     if (body.referralCode) {
-      const referrer = await prisma.user.findUnique({ where: { referralCode: body.referralCode } });
-      if (referrer) referredById = referrer.id;
+      const l1 = await prisma.user.findUnique({
+        where: { referralCode: body.referralCode },
+        select: {
+          id: true,
+          referredBy: {
+            select: {
+              id: true,
+              referredBy: { select: { id: true } },
+            },
+          },
+        },
+      });
+      if (l1) {
+        referredById = l1.id;
+        referrerId2  = l1.referredBy?.id;
+        referrerId3  = l1.referredBy?.referredBy?.id;
+      }
     }
 
     const passwordHash = await bcrypt.hash(body.password, 12);
@@ -50,6 +67,8 @@ router.post('/register', async (req: Request, res: Response, next: NextFunction)
           name: body.name,
           referralCode,
           referredById,
+          referrerId2,
+          referrerId3,
         },
       });
 

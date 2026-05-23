@@ -6,6 +6,7 @@ import { adminMiddleware } from '../middleware/adminMiddleware';
 import { AppError } from '../lib/errors';
 import { creditWallet } from '../services/walletService';
 import { updateWithdrawalStatus } from '../services/sheetsService';
+import { runDailyEarnings, resetDailyStats, resetWeeklyStats } from '../services/cronService';
 import { fetchUsdtInrRate, applyPlatformFee } from '../services/rateService';
 import { TxnType } from '@prisma/client';
 
@@ -91,11 +92,26 @@ router.get('/payment/submissions', async (req: Request, res: Response, next: Nex
   }
 });
 
+// GET /admin/rate
+router.get('/rate', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rate = await fetchUsdtInrRate();
+    res.json({ rate, timestamp: new Date().toISOString() });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /admin/payment/:id/verify
 router.post('/payment/:id/verify', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const body = z.object({ action: z.enum(['approve', 'reject']) }).parse(req.body);
+    const body = z
+      .object({
+        action: z.enum(['approve', 'reject']),
+        inrAmount: z.number().positive().optional(),
+      })
+      .parse(req.body);
 
     const submission = await prisma.paymentSubmission.findUnique({ where: { id } });
     if (!submission) throw new AppError('NOT_FOUND', 'Submission not found', 404);
@@ -105,7 +121,7 @@ router.post('/payment/:id/verify', async (req: Request, res: Response, next: Nex
 
     if (body.action === 'approve') {
       const usdtRate = await fetchUsdtInrRate();
-      const inrAmount = applyPlatformFee(submission.amount, usdtRate);
+      const inrAmount = body.inrAmount ?? applyPlatformFee(submission.amount, usdtRate);
 
       await prisma.$transaction(async (tx) => {
         await tx.paymentSubmission.update({
@@ -223,10 +239,51 @@ router.post('/withdrawal/:id/complete', async (req: Request, res: Response, next
       data: { status: 'COMPLETED', completedAt },
     });
 
-    // Update Google Sheet
     updateWithdrawalStatus(id, 'COMPLETED', completedAt).catch(console.error);
 
     res.json({ id, status: 'completed', completedAt });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /admin/withdrawal/:id/reject
+router.post('/withdrawal/:id/reject', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+
+    const withdrawal = await prisma.withdrawalRequest.findUnique({ where: { id } });
+    if (!withdrawal) throw new AppError('NOT_FOUND', 'Withdrawal request not found', 404);
+    if (withdrawal.status !== 'PENDING') {
+      throw new AppError('ALREADY_PROCESSED', 'Withdrawal already processed', 400);
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.withdrawalRequest.update({
+        where: { id },
+        data: { status: 'REJECTED' },
+      });
+
+      await tx.wallet.update({
+        where: { userId: withdrawal.userId },
+        data: {
+          balance: { increment: withdrawal.amount },
+          available: { increment: withdrawal.amount },
+        },
+      });
+
+      await tx.transaction.create({
+        data: {
+          userId: withdrawal.userId,
+          type: TxnType.CREDIT,
+          amount: withdrawal.amount,
+          label: 'Withdrawal Refund',
+          description: 'Withdrawal rejected by admin',
+        },
+      });
+    });
+
+    res.json({ id, status: 'rejected' });
   } catch (err) {
     next(err);
   }
@@ -318,6 +375,36 @@ router.get('/users', async (req: Request, res: Response, next: NextFunction) => 
         joinDate: u.createdAt.toISOString().split('T')[0],
       })),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /admin/run/daily-earnings
+router.post('/run/daily-earnings', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await runDailyEarnings();
+    res.json({ success: true, message: 'Daily earnings credited to all active plans' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /admin/run/reset-daily
+router.post('/run/reset-daily', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await resetDailyStats();
+    res.json({ success: true, message: 'earnedToday reset for all wallets' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /admin/run/reset-weekly
+router.post('/run/reset-weekly', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await resetWeeklyStats();
+    res.json({ success: true, message: 'earnedThisWeek reset for all wallets' });
   } catch (err) {
     next(err);
   }
