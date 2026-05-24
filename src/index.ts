@@ -13,6 +13,7 @@ import spinRouter from './routes/spin';
 import teamRouter from './routes/team';
 import adminRouter from './routes/admin';
 import supportRouter from './routes/support';
+import configRouter from './routes/config';
 
 import { errorHandler } from './middleware/errorHandler';
 
@@ -38,6 +39,7 @@ app.use('/v1/spin', spinRouter);
 app.use('/v1/team', teamRouter);
 app.use('/v1/admin', adminRouter);
 app.use('/v1/support', supportRouter);
+app.use('/v1/config', configRouter);
 
 // 404
 app.use((_, res) => {

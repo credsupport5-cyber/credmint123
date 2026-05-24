@@ -3,6 +3,7 @@ import prisma from '../lib/prisma';
 import { authMiddleware } from '../middleware/authMiddleware';
 import { AppError } from '../lib/errors';
 import { TxnType } from '@prisma/client';
+import { getCache, setCache, delCache } from '../utils/cache';
 
 const router = Router();
 
@@ -11,13 +12,19 @@ router.use(authMiddleware);
 // GET /plans
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const CACHE_KEY = 'global:plans';
+    const cached = await getCache<object>(CACHE_KEY);
+    if (cached) { res.set('x-cache', 'HIT'); return res.json(cached); }
+
     const plans = await prisma.plan.findMany({ orderBy: { price: 'asc' } });
-    res.json({
+    const body = {
       plans: plans.map((p) => ({
         ...p,
         totalReturn: p.dailyEarning * p.duration,
       })),
-    });
+    };
+    await setCache(CACHE_KEY, body, 60 * 60);
+    res.json(body);
   } catch (err) {
     next(err);
   }
@@ -88,6 +95,9 @@ router.post('/:planId/buy', async (req: Request, res: Response, next: NextFuncti
     if (user?.referredById) referrers.push({ id: user.referredById, earning: Math.floor(plan.price * REFERRAL_RATES[0]), level: 1 });
     if (user?.referrerId2)  referrers.push({ id: user.referrerId2,  earning: Math.floor(plan.price * REFERRAL_RATES[1]), level: 2 });
     if (user?.referrerId3)  referrers.push({ id: user.referrerId3,  earning: Math.floor(plan.price * REFERRAL_RATES[2]), level: 3 });
+
+    // Invalidate per-user team cache when plan is bought (referral chain changes)
+    await delCache(`team:${userId}`);
 
     const result = await prisma.$transaction(async (tx) => {
       await tx.wallet.update({

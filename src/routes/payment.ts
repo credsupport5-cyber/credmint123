@@ -4,6 +4,7 @@ import prisma from '../lib/prisma';
 import { authMiddleware } from '../middleware/authMiddleware';
 import { AppError } from '../lib/errors';
 import { appendDepositRow } from '../services/sheetsService';
+import { getCache, setCache } from '../utils/cache';
 
 const router = Router();
 
@@ -12,6 +13,10 @@ router.use(authMiddleware);
 // GET /payment/method
 router.get('/method', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const CACHE_KEY = 'global:payment_method';
+    const cached = await getCache<object>(CACHE_KEY);
+    if (cached) { res.set('x-cache', 'HIT'); return res.json(cached); }
+
     const method = await prisma.paymentMethod.findFirst({
       where: { isActive: true },
       orderBy: { createdAt: 'desc' },
@@ -21,12 +26,14 @@ router.get('/method', async (req: Request, res: Response, next: NextFunction) =>
       throw new AppError('NO_PAYMENT_METHOD_SET', 'No payment method available at this time', 404);
     }
 
-    res.json({
+    const body = {
       id: method.id,
       type: method.type.toLowerCase(),
       details: method.details,
       updatedAt: method.createdAt,
-    });
+    };
+    await setCache(CACHE_KEY, body, 60 * 60);
+    res.json(body);
   } catch (err) {
     next(err);
   }

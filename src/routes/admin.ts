@@ -9,6 +9,7 @@ import { updateWithdrawalStatus } from '../services/sheetsService';
 import { runDailyEarnings, resetDailyStats, resetWeeklyStats } from '../services/cronService';
 import { fetchUsdtInrRate, applyPlatformFee } from '../services/rateService';
 import { TxnType } from '@prisma/client';
+import { getCache, setCache, delCache } from '../utils/cache';
 
 const router = Router();
 
@@ -26,6 +27,7 @@ router.post('/payment/method', async (req: Request, res: Response, next: NextFun
 
     // Deactivate all existing methods
     await prisma.paymentMethod.updateMany({ data: { isActive: false } });
+    await delCache('global:payment_method');
 
     const method = await prisma.paymentMethod.create({
       data: {
@@ -95,8 +97,14 @@ router.get('/payment/submissions', async (req: Request, res: Response, next: Nex
 // GET /admin/rate
 router.get('/rate', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const CACHE_KEY = 'global:usdt_rate';
+    const cached = await getCache<{ rate: number; timestamp: string }>(CACHE_KEY);
+    if (cached) { res.set('x-cache', 'HIT'); return res.json(cached); }
+
     const rate = await fetchUsdtInrRate();
-    res.json({ rate, timestamp: new Date().toISOString() });
+    const body = { rate, timestamp: new Date().toISOString() };
+    await setCache(CACHE_KEY, body, 60 * 15);
+    res.json(body);
   } catch (err) {
     next(err);
   }
@@ -405,6 +413,36 @@ router.post('/run/reset-weekly', async (req: Request, res: Response, next: NextF
   try {
     await resetWeeklyStats();
     res.json({ success: true, message: 'earnedThisWeek reset for all wallets' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /admin/users/:userId — hard delete all data for a user
+router.delete('/users/:userId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = z.object({ userId: z.string().uuid() }).parse(req.params);
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new AppError('NOT_FOUND', 'User not found', 404);
+
+    await prisma.$transaction([
+      prisma.refreshToken.deleteMany({ where: { userId } }),
+      prisma.paymentSubmission.deleteMany({ where: { userId } }),
+      prisma.withdrawalRequest.deleteMany({ where: { userId } }),
+      prisma.transaction.deleteMany({ where: { userId } }),
+      prisma.spinLog.deleteMany({ where: { userId } }),
+      prisma.supportTicket.deleteMany({ where: { userId } }),
+      prisma.userPlan.deleteMany({ where: { userId } }),
+      prisma.wallet.deleteMany({ where: { userId } }),
+      prisma.referral.deleteMany({ where: { OR: [{ referrerId: userId }, { refereeId: userId }] } }),
+      prisma.user.delete({ where: { id: userId } }),
+    ]);
+
+    await delCache(`team:${userId}`);
+    await delCache(`spin:status:${userId}`);
+
+    res.json({ message: 'User deleted', userId });
   } catch (err) {
     next(err);
   }

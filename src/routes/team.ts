@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
 import { authMiddleware } from '../middleware/authMiddleware';
+import { getCache, setCache } from '../utils/cache';
 
 const router = Router();
 
@@ -11,6 +12,9 @@ router.use(authMiddleware);
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.userId;
+    const CACHE_KEY = `team:${userId}`;
+    const cached = await getCache<object>(CACHE_KEY);
+    if (cached) { res.set('x-cache', 'HIT'); return res.json(cached); }
 
     const weekStart = new Date();
     weekStart.setDate(weekStart.getDate() - weekStart.getDay());
@@ -52,7 +56,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 
     const weeklySignups = directSignups.filter((u) => u.createdAt >= weekStart).length;
 
-    res.json({
+    const body = {
       stats: {
         totalReferrals: directSignups.length,
         thisWeek: weeklySignups,
@@ -68,7 +72,9 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         earningsForMe: earningsMap[u.id] ?? 0,
         status: u.userPlans.length > 0 ? 'active' : 'registered',
       })),
-    });
+    };
+    await setCache(CACHE_KEY, body, 60 * 30);
+    res.json(body);
   } catch (err) {
     next(err);
   }
