@@ -165,16 +165,24 @@ enum SubmissionStatus {
 }
 
 model WithdrawalRequest {
-  id            String           @id @default(uuid())
+  id            String             @id @default(uuid())
   userId        String
-  user          User             @relation(fields: [userId], references: [id])
+  user          User               @relation(fields: [userId], references: [id])
   amount        Float
-  accountNumber String
-  ifsc          String
-  accountName   String
-  status        WithdrawalStatus @default(PENDING)
-  createdAt     DateTime         @default(now())
+  method        WithdrawalMethod   @default(BANK)
+  accountNumber String?
+  ifsc          String?
+  accountName   String?
+  usdtAddress   String?
+  status        WithdrawalStatus   @default(PENDING)
+  createdAt     DateTime           @default(now())
   completedAt   DateTime?
+}
+
+enum WithdrawalMethod {
+  BANK
+  USDT
+  CASH
 }
 
 enum WithdrawalStatus {

@@ -9,20 +9,32 @@ const router = Router();
 
 router.use(authMiddleware);
 
+const withdrawalBodySchema = z.discriminatedUnion('method', [
+  z.object({
+    method: z.literal('BANK'),
+    amount: z.number().min(100, 'Minimum withdrawal is ₹100'),
+    accountName: z.string().min(1, 'Account holder name required'),
+    accountNumber: z.string().min(9).max(18),
+    confirmAccountNumber: z.string().min(9).max(18),
+    ifsc: z.string().length(11, 'IFSC must be 11 characters'),
+  }),
+  z.object({
+    method: z.literal('USDT'),
+    amount: z.number().min(100, 'Minimum withdrawal is ₹100'),
+    usdtAddress: z.string().min(20, 'Enter a valid USDT wallet address'),
+  }),
+  z.object({
+    method: z.literal('CASH'),
+    amount: z.number().min(200000, 'Minimum cash withdrawal is ₹2,00,000'),
+  }),
+]);
+
 // POST /withdrawal/request
 router.post('/request', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const body = z
-      .object({
-        amount: z.number().min(100, 'Minimum withdrawal is ₹100'),
-        accountName: z.string().min(1, 'Account holder name required'),
-        accountNumber: z.string().min(9).max(18),
-        confirmAccountNumber: z.string().min(9).max(18),
-        ifsc: z.string().length(11, 'IFSC must be 11 characters'),
-      })
-      .parse(req.body);
+    const body = withdrawalBodySchema.parse(req.body);
 
-    if (body.accountNumber !== body.confirmAccountNumber) {
+    if (body.method === 'BANK' && body.accountNumber !== body.confirmAccountNumber) {
       throw new AppError('ACCOUNT_NUMBER_MISMATCH', 'Account numbers do not match', 400);
     }
 
@@ -54,32 +66,34 @@ router.post('/request', async (req: Request, res: Response, next: NextFunction) 
       data: {
         userId,
         amount: body.amount,
-        accountNumber: body.accountNumber,
-        ifsc: body.ifsc,
-        accountName: body.accountName,
+        method: body.method,
+        accountNumber: body.method === 'BANK' ? body.accountNumber : null,
+        ifsc: body.method === 'BANK' ? body.ifsc : null,
+        accountName: body.method === 'BANK' ? body.accountName : null,
+        usdtAddress: body.method === 'USDT' ? body.usdtAddress : null,
       },
     });
+
+    const sheetAccountNumber = body.method === 'BANK' ? body.accountNumber : body.method === 'USDT' ? body.usdtAddress : 'CASH';
+    const sheetIfsc = body.method === 'BANK' ? body.ifsc : '';
+    const sheetAccountName = body.method === 'BANK' ? body.accountName : body.method === 'USDT' ? 'USDT' : 'CASH';
 
     appendWithdrawalRow({
       id: withdrawal.id,
       userName: user?.name ?? '',
       userPhone: user?.phone ?? '',
       amount: body.amount,
-      accountNumber: body.accountNumber,
-      ifsc: body.ifsc,
-      accountName: body.accountName,
+      accountNumber: sheetAccountNumber,
+      ifsc: sheetIfsc,
+      accountName: sheetAccountName,
       status: 'PENDING',
       createdAt: withdrawal.createdAt,
     }).catch(console.error);
 
-    const maskedAccount = 'XXXX' + body.accountNumber.slice(-7);
-
     res.status(201).json({
       id: withdrawal.id,
       amount: withdrawal.amount,
-      accountNumber: maskedAccount,
-      ifsc: withdrawal.ifsc,
-      accountName: withdrawal.accountName,
+      method: withdrawal.method,
       status: withdrawal.status.toLowerCase(),
       createdAt: withdrawal.createdAt,
       message: 'Withdrawal requested. Will be processed within 1-2 business days.',
@@ -122,7 +136,7 @@ router.get('/history', async (req: Request, res: Response, next: NextFunction) =
       total,
       withdrawals: withdrawals.map((w) => ({
         ...w,
-        accountNumber: 'XXXX' + w.accountNumber.slice(-7),
+        accountNumber: w.accountNumber ? 'XXXX' + w.accountNumber.slice(-7) : null,
       })),
     });
   } catch (err) {

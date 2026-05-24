@@ -218,9 +218,11 @@ router.get('/withdrawal/requests', async (req: Request, res: Response, next: Nex
         userName: w.user.name,
         userPhone: w.user.phone,
         amount: w.amount,
-        accountNumber: 'XXXX' + w.accountNumber.slice(-7),
+        method: w.method,
+        accountNumber: w.accountNumber ? 'XXXX' + w.accountNumber.slice(-7) : null,
         ifsc: w.ifsc,
         accountName: w.accountName,
+        usdtAddress: w.usdtAddress,
         status: w.status.toLowerCase(),
         createdAt: w.createdAt,
       })),
@@ -413,6 +415,54 @@ router.post('/run/reset-weekly', async (req: Request, res: Response, next: NextF
   try {
     await resetWeeklyStats();
     res.json({ success: true, message: 'earnedThisWeek reset for all wallets' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /admin/kyc/users
+router.get('/kyc/users', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const query = z
+      .object({
+        status: z.enum(['pending', 'verified', 'rejected']).default('pending'),
+        limit: z.coerce.number().min(1).max(100).default(50),
+        offset: z.coerce.number().min(0).default(0),
+      })
+      .parse(req.query);
+
+    const kycStatus = query.status.toUpperCase() as 'PENDING' | 'VERIFIED' | 'REJECTED';
+
+    const [total, users] = await Promise.all([
+      prisma.user.count({ where: { kycStatus } }),
+      prisma.user.findMany({
+        where: { kycStatus },
+        orderBy: { createdAt: 'asc' },
+        skip: query.offset,
+        take: query.limit,
+        select: { id: true, name: true, phone: true, kycStatus: true, createdAt: true },
+      }),
+    ]);
+
+    res.json({ total, users });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /admin/kyc/:userId/verify
+router.post('/kyc/:userId/verify', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = req.params;
+    const { action } = z.object({ action: z.enum(['approve', 'reject']) }).parse(req.body);
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new AppError('NOT_FOUND', 'User not found', 404);
+
+    const kycStatus = action === 'approve' ? 'VERIFIED' : 'REJECTED';
+    await prisma.user.update({ where: { id: userId }, data: { kycStatus } });
+
+    res.json({ userId, kycStatus: kycStatus.toLowerCase() });
   } catch (err) {
     next(err);
   }
