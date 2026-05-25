@@ -5,7 +5,7 @@ import { authMiddleware } from '../middleware/authMiddleware';
 import { adminMiddleware } from '../middleware/adminMiddleware';
 import { AppError } from '../lib/errors';
 import { creditWallet } from '../services/walletService';
-import { updateWithdrawalStatus } from '../services/sheetsService';
+import { updateWithdrawalStatus, updateDepositStatus, appendKycRow } from '../services/sheetsService';
 import { runDailyEarnings, resetDailyStats, resetWeeklyStats } from '../services/cronService';
 import { fetchUsdtInrRate, applyPlatformFee } from '../services/rateService';
 import { TxnType } from '@prisma/client';
@@ -160,6 +160,8 @@ router.post('/payment/:id/verify', async (req: Request, res: Response, next: Nex
         where: { userId: submission.userId },
       });
 
+      updateDepositStatus(id, 'APPROVED', new Date()).catch(console.error);
+
       res.json({
         submission: { id, status: 'approved' },
         walletCredited: {
@@ -175,6 +177,8 @@ router.post('/payment/:id/verify', async (req: Request, res: Response, next: Nex
         where: { id },
         data: { status: 'REJECTED', verifiedAt: new Date() },
       });
+
+      updateDepositStatus(id, 'REJECTED', new Date()).catch(console.error);
 
       res.json({ submission: { id, status: 'rejected' } });
     }
@@ -232,6 +236,50 @@ router.get('/withdrawal/requests', async (req: Request, res: Response, next: Nex
   }
 });
 
+// PATCH /admin/withdrawal/:id — edit bank/USDT details before completing
+router.patch('/withdrawal/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const body = z
+      .object({
+        accountName: z.string().min(1).optional(),
+        accountNumber: z.string().min(9).max(18).optional(),
+        ifsc: z.string().length(11).optional(),
+        usdtAddress: z.string().min(20).optional(),
+        amount: z.number().positive().optional(),
+      })
+      .parse(req.body);
+
+    const withdrawal = await prisma.withdrawalRequest.findUnique({ where: { id } });
+    if (!withdrawal) throw new AppError('NOT_FOUND', 'Withdrawal request not found', 404);
+    if (withdrawal.status !== 'PENDING') {
+      throw new AppError('ALREADY_PROCESSED', 'Cannot edit a processed withdrawal', 400);
+    }
+
+    const updated = await prisma.withdrawalRequest.update({
+      where: { id },
+      data: {
+        ...(body.accountName && { accountName: body.accountName }),
+        ...(body.accountNumber && { accountNumber: body.accountNumber }),
+        ...(body.ifsc && { ifsc: body.ifsc }),
+        ...(body.usdtAddress && { usdtAddress: body.usdtAddress }),
+        ...(body.amount && { amount: body.amount }),
+      },
+    });
+
+    res.json({
+      id: updated.id,
+      amount: updated.amount,
+      accountName: updated.accountName,
+      accountNumber: updated.accountNumber ? 'XXXX' + updated.accountNumber.slice(-7) : null,
+      ifsc: updated.ifsc,
+      status: updated.status.toLowerCase(),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /admin/withdrawal/:id/complete
 router.post('/withdrawal/:id/complete', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -268,6 +316,7 @@ router.post('/withdrawal/:id/reject', async (req: Request, res: Response, next: 
       throw new AppError('ALREADY_PROCESSED', 'Withdrawal already processed', 400);
     }
 
+    const rejectedAt = new Date();
     await prisma.$transaction(async (tx) => {
       await tx.withdrawalRequest.update({
         where: { id },
@@ -292,6 +341,8 @@ router.post('/withdrawal/:id/reject', async (req: Request, res: Response, next: 
         },
       });
     });
+
+    updateWithdrawalStatus(id, 'REJECTED', rejectedAt).catch(console.error);
 
     res.json({ id, status: 'rejected' });
   } catch (err) {
@@ -461,6 +512,14 @@ router.post('/kyc/:userId/verify', async (req: Request, res: Response, next: Nex
 
     const kycStatus = action === 'approve' ? 'VERIFIED' : 'REJECTED';
     await prisma.user.update({ where: { id: userId }, data: { kycStatus } });
+
+    appendKycRow({
+      userId,
+      name: user.name,
+      phone: user.phone,
+      action: kycStatus,
+      createdAt: new Date(),
+    }).catch(console.error);
 
     res.json({ userId, kycStatus: kycStatus.toLowerCase() });
   } catch (err) {
