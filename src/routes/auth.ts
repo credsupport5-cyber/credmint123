@@ -23,6 +23,7 @@ const loginSchema = z.object({
 // POST /auth/register
 router.post('/register', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    throw new AppError('SERVICE_UNAVAILABLE', 'Registration is temporarily disabled', 503);
     const body = registerSchema.parse(req.body);
 
     const existing = await prisma.user.findUnique({ where: { phone: body.phone } });
@@ -108,6 +109,7 @@ router.post('/register', async (req: Request, res: Response, next: NextFunction)
 // POST /auth/login
 router.post('/login', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    throw new AppError('SERVICE_UNAVAILABLE', 'Login is temporarily disabled', 503);
     const body = loginSchema.parse(req.body);
 
     const user = await prisma.user.findUnique({ where: { phone: body.phone } });
