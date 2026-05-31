@@ -127,14 +127,15 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
       data: { userId: user.id, token: refreshToken, expiresAt: expiry },
     });
 
+    const u = user!;
     res.json({
       user: {
-        id: user.id,
-        phone: user.phone,
-        name: user.name,
-        kycStatus: user.kycStatus,
-        referralCode: user.referralCode,
-        role: user.role,
+        id: u.id,
+        phone: u.phone,
+        name: u.name,
+        kycStatus: u.kycStatus,
+        referralCode: u.referralCode,
+        role: u.role,
       },
       accessToken,
       refreshToken,
