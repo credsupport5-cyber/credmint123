@@ -5,7 +5,7 @@ import { authMiddleware } from '../middleware/authMiddleware';
 import { adminMiddleware } from '../middleware/adminMiddleware';
 import { AppError } from '../lib/errors';
 import { creditWallet } from '../services/walletService';
-import { updateWithdrawalStatus, updateDepositStatus, appendKycRow } from '../services/sheetsService';
+import { updateWithdrawalStatus, updateDepositStatus, appendKycRow, backfillWithdrawalSheet, backfillDepositSheet } from '../services/sheetsService';
 import { runDailyEarnings, resetDailyStats, resetWeeklyStats } from '../services/cronService';
 import { fetchUsdtInrRate, applyPlatformFee } from '../services/rateService';
 import { TxnType } from '@prisma/client';
@@ -130,12 +130,15 @@ router.post('/payment/:id/verify', async (req: Request, res: Response, next: Nex
     if (body.action === 'approve') {
       const usdtRate = await fetchUsdtInrRate();
       const inrAmount = body.inrAmount ?? applyPlatformFee(submission.amount, usdtRate);
+      const verifiedAt = new Date();
 
       await prisma.$transaction(async (tx) => {
-        await tx.paymentSubmission.update({
-          where: { id },
-          data: { status: 'APPROVED', verifiedAt: new Date(), inrAmount, usdtRate },
+        // Fix #2: atomic status guard — prevents double-credit on concurrent admin approvals
+        const updated = await tx.paymentSubmission.updateMany({
+          where: { id, status: 'PENDING' },
+          data: { status: 'APPROVED', verifiedAt, inrAmount, usdtRate },
         });
+        if (updated.count === 0) throw new AppError('ALREADY_PROCESSED', 'Submission already processed', 400);
 
         await tx.wallet.update({
           where: { userId: submission.userId },
@@ -160,7 +163,18 @@ router.post('/payment/:id/verify', async (req: Request, res: Response, next: Nex
         where: { userId: submission.userId },
       });
 
-      updateDepositStatus(id, 'APPROVED', new Date()).catch(console.error);
+      const submissionUser = await prisma.user.findUnique({
+        where: { id: submission.userId },
+        select: { name: true, phone: true },
+      });
+      const method = await prisma.paymentMethod.findUnique({ where: { id: submission.methodId } });
+      updateDepositStatus(id, 'APPROVED', new Date(), {
+        userName: submissionUser?.name ?? '',
+        userPhone: submissionUser?.phone ?? '',
+        amount: inrAmount,
+        txnHash: submission.txnId,
+        methodType: method?.type ?? 'UPI',
+      }).catch(console.error);
 
       res.json({
         submission: { id, status: 'approved' },
@@ -173,12 +187,24 @@ router.post('/payment/:id/verify', async (req: Request, res: Response, next: Nex
         },
       });
     } else {
-      await prisma.paymentSubmission.update({
-        where: { id },
+      const rejResult = await prisma.paymentSubmission.updateMany({
+        where: { id, status: 'PENDING' },
         data: { status: 'REJECTED', verifiedAt: new Date() },
       });
+      if (rejResult.count === 0) throw new AppError('ALREADY_PROCESSED', 'Submission already processed', 400);
 
-      updateDepositStatus(id, 'REJECTED', new Date()).catch(console.error);
+      const rejSubmissionUser = await prisma.user.findUnique({
+        where: { id: submission.userId },
+        select: { name: true, phone: true },
+      });
+      const rejMethod = await prisma.paymentMethod.findUnique({ where: { id: submission.methodId } });
+      updateDepositStatus(id, 'REJECTED', new Date(), {
+        userName: rejSubmissionUser?.name ?? '',
+        userPhone: rejSubmissionUser?.phone ?? '',
+        amount: submission.amount,
+        txnHash: submission.txnId,
+        methodType: rejMethod?.type ?? 'UPI',
+      }).catch(console.error);
 
       res.json({ submission: { id, status: 'rejected' } });
     }
@@ -292,12 +318,27 @@ router.post('/withdrawal/:id/complete', async (req: Request, res: Response, next
     }
 
     const completedAt = new Date();
-    await prisma.withdrawalRequest.update({
-      where: { id },
-      data: { status: 'COMPLETED', completedAt },
+    // Fix #3: atomic status guard on complete
+    await prisma.$transaction(async (tx) => {
+      const updated = await tx.withdrawalRequest.updateMany({
+        where: { id, status: 'PENDING' },
+        data: { status: 'COMPLETED', completedAt },
+      });
+      if (updated.count === 0) throw new AppError('ALREADY_PROCESSED', 'Withdrawal already processed', 400);
     });
 
-    updateWithdrawalStatus(id, 'COMPLETED', completedAt).catch(console.error);
+    const wUser = await prisma.user.findUnique({ where: { id: withdrawal.userId }, select: { name: true, phone: true } });
+    const sheetAccountNumber = withdrawal.usdtAddress ?? withdrawal.accountNumber ?? 'CASH';
+    const sheetIfsc = withdrawal.ifsc ?? '';
+    const sheetAccountName = withdrawal.accountName ?? (withdrawal.usdtAddress ? 'USDT' : 'CASH');
+    updateWithdrawalStatus(id, 'COMPLETED', completedAt, {
+      userName: wUser?.name ?? '',
+      userPhone: wUser?.phone ?? '',
+      amount: withdrawal.amount,
+      accountNumber: sheetAccountNumber,
+      ifsc: sheetIfsc,
+      accountName: sheetAccountName,
+    }).catch(console.error);
 
     res.json({ id, status: 'completed', completedAt });
   } catch (err) {
@@ -318,10 +359,12 @@ router.post('/withdrawal/:id/reject', async (req: Request, res: Response, next: 
 
     const rejectedAt = new Date();
     await prisma.$transaction(async (tx) => {
-      await tx.withdrawalRequest.update({
-        where: { id },
+      // Fix #3: atomic status guard — prevents double-refund on concurrent admin rejects
+      const updated = await tx.withdrawalRequest.updateMany({
+        where: { id, status: 'PENDING' },
         data: { status: 'REJECTED' },
       });
+      if (updated.count === 0) throw new AppError('ALREADY_PROCESSED', 'Withdrawal already processed', 400);
 
       await tx.wallet.update({
         where: { userId: withdrawal.userId },
@@ -342,7 +385,18 @@ router.post('/withdrawal/:id/reject', async (req: Request, res: Response, next: 
       });
     });
 
-    updateWithdrawalStatus(id, 'REJECTED', rejectedAt).catch(console.error);
+    const rejWUser = await prisma.user.findUnique({ where: { id: withdrawal.userId }, select: { name: true, phone: true } });
+    const rejSheetAccNum = withdrawal.usdtAddress ?? withdrawal.accountNumber ?? 'CASH';
+    const rejSheetIfsc = withdrawal.ifsc ?? '';
+    const rejSheetAccName = withdrawal.accountName ?? (withdrawal.usdtAddress ? 'USDT' : 'CASH');
+    updateWithdrawalStatus(id, 'REJECTED', rejectedAt, {
+      userName: rejWUser?.name ?? '',
+      userPhone: rejWUser?.phone ?? '',
+      amount: withdrawal.amount,
+      accountNumber: rejSheetAccNum,
+      ifsc: rejSheetIfsc,
+      accountName: rejSheetAccName,
+    }).catch(console.error);
 
     res.json({ id, status: 'rejected' });
   } catch (err) {
@@ -441,12 +495,70 @@ router.get('/users', async (req: Request, res: Response, next: NextFunction) => 
   }
 });
 
+// POST /admin/sheets/backfill
+router.post('/sheets/backfill', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { type } = z.object({ type: z.enum(['withdrawals', 'deposits', 'all']) }).parse(req.body);
+
+    if (type === 'withdrawals' || type === 'all') {
+      const rows = await prisma.withdrawalRequest.findMany({
+        orderBy: { createdAt: 'asc' },
+        include: { user: { select: { name: true, phone: true } } },
+      });
+      await backfillWithdrawalSheet(rows.map((w) => ({
+        id: w.id,
+        userName: w.user.name,
+        userPhone: w.user.phone,
+        amount: w.amount,
+        accountNumber: w.usdtAddress ?? w.accountNumber ?? 'CASH',
+        ifsc: w.ifsc ?? '',
+        accountName: w.accountName ?? (w.usdtAddress ? 'USDT' : 'CASH'),
+        status: w.status,
+        createdAt: w.createdAt,
+        completedAt: w.completedAt,
+      })));
+    }
+
+    if (type === 'deposits' || type === 'all') {
+      const rows = await prisma.paymentSubmission.findMany({
+        orderBy: { createdAt: 'asc' },
+        include: {
+          user: { select: { name: true, phone: true } },
+          method: { select: { type: true } },
+        },
+      });
+      await backfillDepositSheet(rows.map((d) => ({
+        id: d.id,
+        userName: d.user.name,
+        userPhone: d.user.phone,
+        amount: d.inrAmount ?? d.amount,
+        txnHash: d.txnId,
+        methodType: d.method.type,
+        status: d.status,
+        createdAt: d.createdAt,
+        verifiedAt: d.verifiedAt,
+      })));
+    }
+
+    res.json({ success: true, type });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /admin/run/daily-earnings
+// Pass { "force": true } in body to bypass day lock (e.g. after partial failure)
 router.post('/run/daily-earnings', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    await runDailyEarnings();
-    res.json({ success: true, message: 'Daily earnings credited to all active plans' });
-  } catch (err) {
+    const { force } = z.object({ force: z.boolean().optional() }).parse(req.body);
+    const result = await runDailyEarnings(force ?? false);
+    res.json({ success: true, message: `Daily earnings done. Credited ${result.credited}/${result.total} plans.` });
+  } catch (err: unknown) {
+    const e = err as { code?: string; statusCode?: number; message?: string };
+    if (e?.code === 'ALREADY_RAN') {
+      res.status(409).json({ error: 'ALREADY_RAN', message: e.message ?? 'Already ran today. Pass force:true to override.' });
+      return;
+    }
     next(err);
   }
 });

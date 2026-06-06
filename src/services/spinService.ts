@@ -60,49 +60,60 @@ export async function getSpinStatus(prisma: PrismaClient, userId: string) {
   };
 }
 
-export async function performSpin(
-  prisma: PrismaClient,
-  userId: string,
-) {
+// Fix #4: spinLog + creditWallet in single atomic transaction
+export async function performSpin(prisma: PrismaClient, userId: string) {
   const status = await getSpinStatus(prisma, userId);
 
   if (status.spinsRemaining === 0) {
     throw new AppError('NO_SPINS_LEFT', 'No spins remaining for today', 400);
   }
 
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
   const selectedPrize = prizeAtIndex(status.planId, status.spinsUsedToday);
 
-  await prisma.spinLog.create({
-    data: { userId, prize: selectedPrize.label, value: selectedPrize.value },
+  let transactionRecord = null;
+
+  await prisma.$transaction(async (tx) => {
+    // Re-check spin count inside tx to prevent concurrent double-spin
+    const spinsNow = await tx.spinLog.count({
+      where: { userId, createdAt: { gte: todayStart } },
+    });
+    if (spinsNow >= status.spinsAllotted) {
+      throw new AppError('NO_SPINS_LEFT', 'No spins remaining for today', 400);
+    }
+
+    await tx.spinLog.create({
+      data: { userId, prize: selectedPrize.label, value: selectedPrize.value },
+    });
+
+    if (!selectedPrize.isTryAgain && selectedPrize.value > 0) {
+      transactionRecord = await creditWallet(
+        prisma,
+        userId,
+        selectedPrize.value,
+        'Spin Prize',
+        `Won ${selectedPrize.label} on Spin & Earn`,
+        tx as Parameters<typeof creditWallet>[5]
+      );
+    }
   });
 
-  let transaction = null;
-  let updatedWallet = null;
-
-  if (!selectedPrize.isTryAgain && selectedPrize.value > 0) {
-    transaction = await creditWallet(
-      prisma,
-      userId,
-      selectedPrize.value,
-      'Spin Prize',
-      `Won ${selectedPrize.label} on Spin & Earn`
-    );
-    updatedWallet = await prisma.wallet.findUnique({ where: { userId } });
-  }
+  const updatedWallet = !selectedPrize.isTryAgain && selectedPrize.value > 0
+    ? await prisma.wallet.findUnique({ where: { userId } })
+    : null;
 
   return {
     prize: selectedPrize,
     spinsRemaining: status.spinsRemaining - 1,
     wallet: updatedWallet,
-    transaction,
+    transaction: transactionRecord,
   };
 }
 
-export async function batchPerformSpins(
-  prisma: PrismaClient,
-  userId: string,
-  count: number
-) {
+// Fix #4: all spinLogs + creditWallet in single atomic transaction
+export async function batchPerformSpins(prisma: PrismaClient, userId: string, count: number) {
   const status = await getSpinStatus(prisma, userId);
 
   if (status.spinsRemaining < count) {
@@ -113,21 +124,44 @@ export async function batchPerformSpins(
     );
   }
 
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
   let totalWon = 0;
   const results: Prize[] = [];
 
-  for (let i = 0; i < count; i++) {
-    const prize = prizeAtIndex(status.planId, status.spinsUsedToday + i);
-    await prisma.spinLog.create({ data: { userId, prize: prize.label, value: prize.value } });
-    totalWon += prize.value;
-    results.push(prize);
-  }
+  await prisma.$transaction(async (tx) => {
+    const spinsNow = await tx.spinLog.count({
+      where: { userId, createdAt: { gte: todayStart } },
+    });
+    if (spinsNow + count > status.spinsAllotted) {
+      throw new AppError(
+        'NO_SPINS_LEFT',
+        `Only ${status.spinsAllotted - spinsNow} spins remaining`,
+        400
+      );
+    }
 
-  let updatedWallet = null;
-  if (totalWon > 0) {
-    await creditWallet(prisma, userId, totalWon, 'Spin Prize', `Won ₹${totalWon} from ${count} spins`);
-    updatedWallet = await prisma.wallet.findUnique({ where: { userId } });
-  }
+    for (let i = 0; i < count; i++) {
+      const prize = prizeAtIndex(status.planId, spinsNow + i);
+      await tx.spinLog.create({ data: { userId, prize: prize.label, value: prize.value } });
+      totalWon += prize.value;
+      results.push(prize);
+    }
+
+    if (totalWon > 0) {
+      await creditWallet(
+        prisma,
+        userId,
+        totalWon,
+        'Spin Prize',
+        `Won ₹${totalWon} from ${count} spins`,
+        tx as Parameters<typeof creditWallet>[5]
+      );
+    }
+  });
+
+  const updatedWallet = totalWon > 0 ? await prisma.wallet.findUnique({ where: { userId } }) : null;
 
   return {
     results,

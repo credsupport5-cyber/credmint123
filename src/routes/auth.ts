@@ -1,10 +1,20 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
+import rateLimit from 'express-rate-limit';
 import prisma from '../lib/prisma';
 import { signAccessToken, signRefreshToken, verifyRefreshToken, generateReferralCode } from '../lib/auth';
 import { AppError } from '../lib/errors';
 import { authMiddleware } from '../middleware/authMiddleware';
+
+// Fix #9: rate limit login/register to prevent brute force
+const authLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'TOO_MANY_REQUESTS', message: 'Too many attempts — try again in 1 minute', statusCode: 429 },
+});
 
 const router = Router();
 
@@ -21,9 +31,8 @@ const loginSchema = z.object({
 });
 
 // POST /auth/register
-router.post('/register', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/register', authLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    throw new AppError('SERVICE_UNAVAILABLE', 'Registration is temporarily disabled', 503);
     const body = registerSchema.parse(req.body);
 
     const existing = await prisma.user.findUnique({ where: { phone: body.phone } });
@@ -55,10 +64,13 @@ router.post('/register', async (req: Request, res: Response, next: NextFunction)
     const passwordHash = await bcrypt.hash(body.password, 12);
     let referralCode = generateReferralCode(body.name);
 
-    // Ensure unique referral code
-    while (await prisma.user.findUnique({ where: { referralCode } })) {
+    // Ensure unique referral code (max 10 attempts)
+    let retries = 0;
+    while (retries < 10 && await prisma.user.findUnique({ where: { referralCode } })) {
       referralCode = generateReferralCode(body.name);
+      retries++;
     }
+    if (retries === 10) throw new AppError('INTERNAL', 'Failed to generate unique referral code', 500);
 
     const user = await prisma.$transaction(async (tx) => {
       const newUser = await tx.user.create({
@@ -107,9 +119,8 @@ router.post('/register', async (req: Request, res: Response, next: NextFunction)
 });
 
 // POST /auth/login
-router.post('/login', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/login', authLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    throw new AppError('SERVICE_UNAVAILABLE', 'Login is temporarily disabled', 503);
     const body = loginSchema.parse(req.body);
 
     const user = await prisma.user.findUnique({ where: { phone: body.phone } });

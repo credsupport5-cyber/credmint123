@@ -69,10 +69,8 @@ router.post('/:planId/buy', async (req: Request, res: Response, next: NextFuncti
     const { planId } = req.params;
     const userId = req.user!.userId;
 
-    // Single round trip: 3 parallel queries, referrer IDs pre-stored on user row
-    const [plan, wallet, user] = await Promise.all([
+    const [plan, user] = await Promise.all([
       prisma.plan.findUnique({ where: { id: planId } }),
-      prisma.wallet.findUnique({ where: { userId } }),
       prisma.user.findUnique({
         where: { id: userId },
         select: { name: true, referredById: true, referrerId2: true, referrerId3: true },
@@ -82,32 +80,31 @@ router.post('/:planId/buy', async (req: Request, res: Response, next: NextFuncti
     if (!plan) throw new AppError('PLAN_NOT_FOUND', 'Plan not found', 404);
     if (plan.upcoming) throw new AppError('PLAN_UPCOMING', 'This plan is not yet available', 400);
 
-    if (!wallet || wallet.available < plan.price) {
-      throw new AppError(
-        'INSUFFICIENT_BALANCE',
-        `Available balance ₹${wallet?.available ?? 0} is less than plan price ₹${plan.price}`,
-        400
-      );
-    }
-
     const REFERRAL_RATES = [0.25, 0.10, 0.05];
     const referrers: Array<{ id: string; earning: number; level: number }> = [];
     if (user?.referredById) referrers.push({ id: user.referredById, earning: Math.floor(plan.price * REFERRAL_RATES[0]), level: 1 });
     if (user?.referrerId2)  referrers.push({ id: user.referrerId2,  earning: Math.floor(plan.price * REFERRAL_RATES[1]), level: 2 });
     if (user?.referrerId3)  referrers.push({ id: user.referrerId3,  earning: Math.floor(plan.price * REFERRAL_RATES[2]), level: 3 });
 
-    // Invalidate per-user team cache when plan is bought (referral chain changes)
-    await delCache(`team:${userId}`);
-
     const result = await prisma.$transaction(async (tx) => {
-      await tx.wallet.update({
-        where: { userId },
+      // Fix #5: re-check balance atomically inside tx with WHERE guard
+      const walletUpdate = await tx.wallet.updateMany({
+        where: { userId, available: { gte: plan.price } },
         data: {
           balance: { decrement: plan.price },
           available: { decrement: plan.price },
           locked: { increment: plan.price },
         },
       });
+
+      if (walletUpdate.count === 0) {
+        const wallet = await tx.wallet.findUnique({ where: { userId } });
+        throw new AppError(
+          'INSUFFICIENT_BALANCE',
+          `Available balance ₹${wallet?.available ?? 0} is less than plan price ₹${plan.price}`,
+          400
+        );
+      }
 
       const txn = await tx.transaction.create({
         data: {
@@ -150,6 +147,12 @@ router.post('/:planId/buy', async (req: Request, res: Response, next: NextFuncti
 
       return { userPlan, txn };
     }, { timeout: 30000 });
+
+    // Fix #10: invalidate team cache for buyer AND all referrers
+    await Promise.all([
+      delCache(`team:${userId}`),
+      ...referrers.map((ref) => delCache(`team:${ref.id}`)),
+    ]);
 
     const updatedWallet = await prisma.wallet.findUnique({ where: { userId } });
 

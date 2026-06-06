@@ -39,39 +39,42 @@ router.post('/request', async (req: Request, res: Response, next: NextFunction) 
     }
 
     const userId = req.user!.userId;
-    const wallet = await prisma.wallet.findUnique({ where: { userId } });
-
-    if (!wallet || wallet.available < body.amount) {
-      throw new AppError(
-        'INSUFFICIENT_BALANCE',
-        `Available balance ₹${wallet?.available ?? 0} is less than requested ₹${body.amount}`,
-        400
-      );
-    }
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { name: true, phone: true },
     });
 
-    await prisma.wallet.update({
-      where: { userId },
-      data: {
-        balance: { decrement: body.amount },
-        available: { decrement: body.amount },
-      },
-    });
+    // Fix #1: wallet debit + withdrawal create in single atomic transaction
+    const withdrawal = await prisma.$transaction(async (tx) => {
+      const updated = await tx.wallet.updateMany({
+        where: { userId, available: { gte: body.amount } },
+        data: {
+          balance: { decrement: body.amount },
+          available: { decrement: body.amount },
+        },
+      });
 
-    const withdrawal = await prisma.withdrawalRequest.create({
-      data: {
-        userId,
-        amount: body.amount,
-        method: body.method,
-        accountNumber: body.method === 'BANK' ? body.accountNumber : null,
-        ifsc: body.method === 'BANK' ? body.ifsc : null,
-        accountName: body.method === 'BANK' ? body.accountName : null,
-        usdtAddress: body.method === 'USDT' ? body.usdtAddress : null,
-      },
+      if (updated.count === 0) {
+        const wallet = await tx.wallet.findUnique({ where: { userId } });
+        throw new AppError(
+          'INSUFFICIENT_BALANCE',
+          `Available balance ₹${wallet?.available ?? 0} is less than requested ₹${body.amount}`,
+          400
+        );
+      }
+
+      return tx.withdrawalRequest.create({
+        data: {
+          userId,
+          amount: body.amount,
+          method: body.method,
+          accountNumber: body.method === 'BANK' ? body.accountNumber : null,
+          ifsc: body.method === 'BANK' ? body.ifsc : null,
+          accountName: body.method === 'BANK' ? body.accountName : null,
+          usdtAddress: body.method === 'USDT' ? body.usdtAddress : null,
+        },
+      });
     });
 
     const sheetAccountNumber = body.method === 'BANK' ? body.accountNumber : body.method === 'USDT' ? body.usdtAddress : 'CASH';
@@ -88,7 +91,7 @@ router.post('/request', async (req: Request, res: Response, next: NextFunction) 
       accountName: sheetAccountName,
       status: 'PENDING',
       createdAt: withdrawal.createdAt,
-    }).catch(console.error);
+    }).catch((err) => console.error('[SHEET FAIL — manual backfill needed] withdrawal:', withdrawal.id, err));
 
     res.status(201).json({
       id: withdrawal.id,

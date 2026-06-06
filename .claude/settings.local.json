@@ -5,7 +5,11 @@
       "Bash(rtk ls *)",
       "Bash(rtk grep *)",
       "Bash(rtk tsc *)",
-      "Bash(rtk prisma *)"
+      "Bash(rtk prisma *)",
+      "Bash(rtk read *)",
+      "Bash(rtk npx *)",
+      "Bash(npm install *)",
+      "Bash(rtk git *)"
     ]
   }
 }

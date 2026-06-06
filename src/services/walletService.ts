@@ -25,6 +25,7 @@ export async function creditWallet(
   });
 }
 
+// Fix #6: use WHERE guard to prevent overdraft on concurrent debits
 export async function debitWallet(
   prisma: PrismaClient,
   userId: string,
@@ -34,18 +35,18 @@ export async function debitWallet(
   tx?: Parameters<Parameters<PrismaClient['$transaction']>[0]>[0]
 ) {
   const client = (tx || prisma) as PrismaClient;
-  const wallet = await client.wallet.findUnique({ where: { userId } });
-  if (!wallet || wallet.available < amount) {
-    throw new Error('INSUFFICIENT_BALANCE');
-  }
 
-  await client.wallet.update({
-    where: { userId },
+  const updated = await client.wallet.updateMany({
+    where: { userId, available: { gte: amount } },
     data: {
       balance: { decrement: amount },
       available: { decrement: amount },
     },
   });
+
+  if (updated.count === 0) {
+    throw new Error('INSUFFICIENT_BALANCE');
+  }
 
   return client.transaction.create({
     data: { userId, type: TxnType.DEBIT, amount, label, description },
