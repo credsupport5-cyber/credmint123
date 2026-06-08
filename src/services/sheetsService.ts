@@ -215,21 +215,25 @@ export async function updateDepositStatus(
     const rows = response.data.values || [];
     const rowIndex = rows.findIndex((r) => r[0] === id);
     if (rowIndex !== -1) {
+      // Update existing PENDING row in place — one row per request, no duplicates
       const sheetRow = rowIndex + 1;
+      const amountCell = rowData ? `₹${rowData.amount}` : undefined;
+      const data: { range: string; values: string[][] }[] = [
+        {
+          range: `${DEPOSITS_SHEET_NAME}!G${sheetRow}:I${sheetRow}`,
+          values: [[status, '', fmtIST(verifiedAt)]],
+        },
+      ];
+      // Refresh credited amount (USDT→INR resolves only at approval)
+      if (amountCell) {
+        data.push({ range: `${DEPOSITS_SHEET_NAME}!D${sheetRow}`, values: [[amountCell]] });
+      }
       await sheets.spreadsheets.values.batchUpdate({
         spreadsheetId: SHEET_ID,
-        requestBody: {
-          valueInputOption: 'RAW',
-          data: [{
-            range: `${DEPOSITS_SHEET_NAME}!G${sheetRow}:I${sheetRow}`,
-            values: [[status, '', fmtIST(verifiedAt)]],
-          }],
-        },
+        requestBody: { valueInputOption: 'RAW', data },
       });
-    }
-
-    // Append second row for the approval event
-    if (rowData) {
+    } else if (rowData) {
+      // Original row missing (e.g. sheet trimmed) — append a single resolved row as fallback
       await sheets.spreadsheets.values.append({
         spreadsheetId: SHEET_ID,
         range: `${DEPOSITS_SHEET_NAME}!A1`,
@@ -324,13 +328,15 @@ export async function backfillDepositSheet(
       range: `${DEPOSITS_SHEET_NAME}!A2:Z`,
     });
 
-    const rows: string[][] = [];
-    for (const d of deposits) {
-      rows.push(buildDepositRow({ ...d, status: 'PENDING', createdAt: d.createdAt }));
+    // One row per deposit. Status column reflects final state; verifiedAt
+    // written to col I for resolved rows (matches updateDepositStatus layout).
+    const rows: string[][] = deposits.map((d) => {
+      const row = buildDepositRow({ ...d, createdAt: d.createdAt });
       if (d.status !== 'PENDING' && d.verifiedAt) {
-        rows.push(buildDepositRow({ ...d, createdAt: d.verifiedAt }));
+        row[8] = fmtIST(d.verifiedAt); // col I
       }
-    }
+      return row;
+    });
 
     if (rows.length === 0) return;
 

@@ -25,24 +25,96 @@ router.post('/payment/method', async (req: Request, res: Response, next: NextFun
       })
       .parse(req.body);
 
-    // Deactivate all existing methods
-    await prisma.paymentMethod.updateMany({ data: { isActive: false } });
+    const type = body.type.toUpperCase() as 'UPI' | 'BANK' | 'USDT';
+
+    // Deactivate only same-type methods so UPI + Bank can coexist
+    await prisma.paymentMethod.updateMany({ where: { type }, data: { isActive: false } });
     await delCache('global:payment_method');
+    await delCache('global:payment_methods');
 
     const method = await prisma.paymentMethod.create({
-      data: {
-        type: body.type.toUpperCase() as 'UPI' | 'BANK' | 'USDT',
-        details: body.details,
-        isActive: true,
-      },
+      data: { type, details: body.details, isActive: true },
     });
 
     res.status(201).json({
       id: method.id,
       type: method.type.toLowerCase(),
+      details: method.details,
       isActive: method.isActive,
       createdAt: method.createdAt,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /admin/payment/methods — list all methods
+router.get('/payment/methods', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const methods = await prisma.paymentMethod.findMany({ orderBy: { createdAt: 'desc' } });
+    res.json({
+      methods: methods.map((m) => ({
+        id: m.id,
+        type: m.type.toLowerCase(),
+        details: m.details,
+        isActive: m.isActive,
+        createdAt: m.createdAt,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /admin/payment/method/:id — edit details / toggle active in place
+router.patch('/payment/method/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const body = z
+      .object({
+        details: z.record(z.string()).optional(),
+        isActive: z.boolean().optional(),
+      })
+      .refine((b) => b.details !== undefined || b.isActive !== undefined, 'Nothing to update')
+      .parse(req.body);
+
+    const existing = await prisma.paymentMethod.findUnique({ where: { id } });
+    if (!existing) throw new AppError('NOT_FOUND', 'Payment method not found', 404);
+
+    const method = await prisma.paymentMethod.update({
+      where: { id },
+      data: {
+        ...(body.details !== undefined ? { details: body.details } : {}),
+        ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+      },
+    });
+    await delCache('global:payment_method');
+    await delCache('global:payment_methods');
+
+    res.json({
+      id: method.id,
+      type: method.type.toLowerCase(),
+      details: method.details,
+      isActive: method.isActive,
+      createdAt: method.createdAt,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /admin/payment/method/:id — deactivate
+router.delete('/payment/method/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const existing = await prisma.paymentMethod.findUnique({ where: { id } });
+    if (!existing) throw new AppError('NOT_FOUND', 'Payment method not found', 404);
+
+    await prisma.paymentMethod.update({ where: { id }, data: { isActive: false } });
+    await delCache('global:payment_method');
+    await delCache('global:payment_methods');
+
+    res.json({ id, isActive: false });
   } catch (err) {
     next(err);
   }
@@ -127,9 +199,19 @@ router.post('/payment/:id/verify', async (req: Request, res: Response, next: Nex
       throw new AppError('ALREADY_PROCESSED', 'Submission already processed', 400);
     }
 
+    const submissionMethod = await prisma.paymentMethod.findUnique({ where: { id: submission.methodId } });
+    const isInrMethod = submissionMethod?.type === 'UPI' || submissionMethod?.type === 'BANK';
+
     if (body.action === 'approve') {
-      const usdtRate = await fetchUsdtInrRate();
-      const inrAmount = body.inrAmount ?? applyPlatformFee(submission.amount, usdtRate);
+      // INR methods (UPI/Bank): amount already in INR, no rate/fee.
+      // USDT: convert at live rate with platform fee.
+      const usdtRate = isInrMethod ? null : await fetchUsdtInrRate();
+      const inrAmount = isInrMethod
+        ? body.inrAmount ?? submission.amount
+        : body.inrAmount ?? applyPlatformFee(submission.amount, usdtRate!);
+      const description = isInrMethod
+        ? `₹${inrAmount} via ${submissionMethod!.type} (ref ${submission.txnId})`
+        : `${submission.amount} USDT @ ₹${usdtRate!.toFixed(2)} (5% fee applied)`;
       const verifiedAt = new Date();
 
       await prisma.$transaction(async (tx) => {
@@ -154,7 +236,7 @@ router.post('/payment/:id/verify', async (req: Request, res: Response, next: Nex
             type: TxnType.CREDIT,
             amount: inrAmount,
             label: 'Deposit',
-            description: `${submission.amount} USDT @ ₹${usdtRate.toFixed(2)} (5% fee applied)`,
+            description,
           },
         });
       });

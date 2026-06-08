@@ -20,6 +20,10 @@ import { errorHandler } from './middleware/errorHandler';
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
+// Render/Heroku/etc terminate TLS at a single proxy hop that sets X-Forwarded-For.
+// Trust 1 hop so express-rate-limit reads the real client IP (ERR_ERL_UNEXPECTED_X_FORWARDED_FOR).
+app.set('trust proxy', 1);
+
 app.use(helmet());
 app.use(cors({ origin: '*', credentials: true }));
 app.use(express.json());

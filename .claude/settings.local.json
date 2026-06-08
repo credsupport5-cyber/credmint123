@@ -9,7 +9,9 @@
       "Bash(rtk read *)",
       "Bash(rtk npx *)",
       "Bash(npm install *)",
-      "Bash(rtk git *)"
+      "Bash(rtk git *)",
+      "Bash(rtk curl *)",
+      "Bash(curl -s -X POST http://localhost:3000/v1/auth/login -H \"Content-Type: application/json\" -d '{\"phone\":\"0000000000\",\"password\":\"admin@credmint\"}')"
     ]
   }
 }
