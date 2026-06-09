@@ -11,7 +11,9 @@
       "Bash(npm install *)",
       "Bash(rtk git *)",
       "Bash(rtk curl *)",
-      "Bash(curl -s -X POST http://localhost:3000/v1/auth/login -H \"Content-Type: application/json\" -d '{\"phone\":\"0000000000\",\"password\":\"admin@credmint\"}')"
+      "Bash(curl -s -X POST http://localhost:3000/v1/auth/login -H \"Content-Type: application/json\" -d '{\"phone\":\"0000000000\",\"password\":\"admin@credmint\"}')",
+      "Bash(git -C /Users/a39038/Documents/GitHub/credMint/backend remote -v)",
+      "Bash(git -C /Users/a39038/Documents/GitHub/credMint/credmint remote -v)"
     ]
   }
 }
