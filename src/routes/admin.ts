@@ -751,4 +751,36 @@ router.delete('/users/:userId', async (req: Request, res: Response, next: NextFu
   }
 });
 
+// DELETE /admin/users/phone/:phone — hard delete all data for a user by phone number
+router.delete('/users/phone/:phone', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { phone } = z.object({ phone: z.string().min(1) }).parse(req.params);
+
+    const user = await prisma.user.findUnique({ where: { phone } });
+    if (!user) throw new AppError('NOT_FOUND', 'User not found', 404);
+
+    const userId = user.id;
+
+    await prisma.$transaction([
+      prisma.refreshToken.deleteMany({ where: { userId } }),
+      prisma.paymentSubmission.deleteMany({ where: { userId } }),
+      prisma.withdrawalRequest.deleteMany({ where: { userId } }),
+      prisma.transaction.deleteMany({ where: { userId } }),
+      prisma.spinLog.deleteMany({ where: { userId } }),
+      prisma.supportTicket.deleteMany({ where: { userId } }),
+      prisma.userPlan.deleteMany({ where: { userId } }),
+      prisma.wallet.deleteMany({ where: { userId } }),
+      prisma.referral.deleteMany({ where: { OR: [{ referrerId: userId }, { refereeId: userId }] } }),
+      prisma.user.delete({ where: { id: userId } }),
+    ]);
+
+    await delCache(`team:${userId}`);
+    await delCache(`spin:status:${userId}`);
+
+    res.json({ message: 'User deleted', userId, phone });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
