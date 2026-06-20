@@ -16,17 +16,14 @@ const SPIN_PRIZES: Record<string, number[]> = {
 
 type Prize = { label: string; value: number; isTryAgain: boolean };
 
-function makePrize(val: number): Prize {
+function prizeAtIndex(planId: string, index: number): Prize {
+  const arr = SPIN_PRIZES[planId] ?? [0];
+  const val = arr[Math.min(index, arr.length - 1)];
   return {
     label: val === 0 ? 'Try Again' : `₹${val}`,
     value: val,
     isTryAgain: val === 0,
   };
-}
-
-function prizeAtIndex(reel: number[], index: number): Prize {
-  const val = reel.length === 0 ? 0 : reel[Math.min(index, reel.length - 1)];
-  return makePrize(val);
 }
 
 export async function getSpinStatus(prisma: PrismaClient, userId: string) {
@@ -47,12 +44,10 @@ export async function getSpinStatus(prisma: PrismaClient, userId: string) {
     throw new AppError('NO_ACTIVE_PLAN', 'An active plan is required to spin', 403);
   }
 
-  // Combined reel = every active plan's prize array concatenated (price asc).
-  // Quota = sum of all plans' spins, so multiple plans => more spins.
-  const sorted = activePlans.sort((a, b) => a.plan.price - b.plan.price);
-  const reelValues = sorted.flatMap((up) => SPIN_PRIZES[up.plan.id] ?? []);
-  const spinsAllotted = reelValues.length;
-  const topPlan = sorted[sorted.length - 1];
+  const topPlan = activePlans.sort((a, b) => b.plan.price - a.plan.price)[0];
+  const planId = topPlan.plan.id;
+  const spinsAllotted = SPIN_PRIZES[planId]?.length ?? 5;
+  const reelValues = SPIN_PRIZES[planId] ?? [];
 
   return {
     spinsAllotted,
@@ -60,7 +55,7 @@ export async function getSpinStatus(prisma: PrismaClient, userId: string) {
     spinsRemaining: Math.max(0, spinsAllotted - spinsUsedToday),
     planTier: topPlan.plan.tier,
     planPrice: topPlan.plan.price,
-    planId: topPlan.plan.id,
+    planId,
     reelValues,
   };
 }
@@ -76,7 +71,7 @@ export async function performSpin(prisma: PrismaClient, userId: string) {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
-  const selectedPrize = prizeAtIndex(status.reelValues, status.spinsUsedToday);
+  const selectedPrize = prizeAtIndex(status.planId, status.spinsUsedToday);
 
   let transactionRecord = null;
 
@@ -148,7 +143,7 @@ export async function batchPerformSpins(prisma: PrismaClient, userId: string, co
     }
 
     for (let i = 0; i < count; i++) {
-      const prize = prizeAtIndex(status.reelValues, spinsNow + i);
+      const prize = prizeAtIndex(status.planId, spinsNow + i);
       await tx.spinLog.create({ data: { userId, prize: prize.label, value: prize.value } });
       totalWon += prize.value;
       results.push(prize);

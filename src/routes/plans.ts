@@ -33,35 +33,30 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 // GET /plans/active
 router.get('/active', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const userPlans = await prisma.userPlan.findMany({
+    const userPlan = await prisma.userPlan.findFirst({
       where: { userId: req.user!.userId, status: 'ACTIVE' },
       include: { plan: true },
-      orderBy: { startDate: 'desc' },
     });
 
-    if (userPlans.length === 0) {
-      res.json({ active: false, userPlan: null, userPlans: [], totalLocked: 0 });
+    if (!userPlan) {
+      res.json({ active: false, userPlan: null });
       return;
     }
 
-    const mapped = userPlans.map((up) => ({
-      id: up.id,
-      planId: up.planId,
-      planName: up.plan.name,
-      startDate: up.startDate,
-      daysCompleted: up.daysCompleted,
-      totalDays: up.plan.duration,
-      lockedAmount: up.lockedAmount,
-      earnedSoFar: up.daysCompleted * up.plan.dailyEarning,
-      status: up.status,
-      dailyEarning: up.plan.dailyEarning,
-    }));
-
     res.json({
       active: true,
-      userPlan: mapped[0], // legacy: most recent active plan
-      userPlans: mapped,
-      totalLocked: mapped.reduce((sum, p) => sum + p.lockedAmount, 0),
+      userPlan: {
+        id: userPlan.id,
+        planId: userPlan.planId,
+        planName: userPlan.plan.name,
+        startDate: userPlan.startDate,
+        daysCompleted: userPlan.daysCompleted,
+        totalDays: userPlan.plan.duration,
+        lockedAmount: userPlan.lockedAmount,
+        earnedSoFar: userPlan.daysCompleted * userPlan.plan.dailyEarning,
+        status: userPlan.status,
+        dailyEarning: userPlan.plan.dailyEarning,
+      },
     });
   } catch (err) {
     next(err);
@@ -93,10 +88,10 @@ router.post('/:planId/buy', async (req: Request, res: Response, next: NextFuncti
 
     const result = await prisma.$transaction(async (tx) => {
       // Fix #5: re-check balance atomically inside tx with WHERE guard
-      // Principal moves available -> locked (locked permanently). balance unchanged.
       const walletUpdate = await tx.wallet.updateMany({
         where: { userId, available: { gte: plan.price } },
         data: {
+          balance: { decrement: plan.price },
           available: { decrement: plan.price },
           locked: { increment: plan.price },
         },
@@ -126,12 +121,11 @@ router.post('/:planId/buy', async (req: Request, res: Response, next: NextFuncti
       });
 
       for (const ref of referrers) {
-        // Referral is income -> withdrawable bucket (user can withdraw it).
         await tx.wallet.update({
           where: { userId: ref.id },
           data: {
             balance: { increment: ref.earning },
-            withdrawable: { increment: ref.earning },
+            available: { increment: ref.earning },
             totalEarned: { increment: ref.earning },
             earnedToday: { increment: ref.earning },
             earnedThisWeek: { increment: ref.earning },
