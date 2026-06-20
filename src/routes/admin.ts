@@ -448,11 +448,12 @@ router.post('/withdrawal/:id/reject', async (req: Request, res: Response, next: 
       });
       if (updated.count === 0) throw new AppError('ALREADY_PROCESSED', 'Withdrawal already processed', 400);
 
+      // Refund back to withdrawable (that's where it was debited from).
       await tx.wallet.update({
         where: { userId: withdrawal.userId },
         data: {
           balance: { increment: withdrawal.amount },
-          available: { increment: withdrawal.amount },
+          withdrawable: { increment: withdrawal.amount },
         },
       });
 
@@ -500,11 +501,12 @@ router.post('/addDiscountsToUser', async (req: Request, res: Response, next: Nex
     if (!wallet) throw new AppError('USER_NOT_FOUND', 'User wallet not found', 404);
 
     await prisma.$transaction(async (tx) => {
+      // Spin bonus is income -> withdrawable.
       await tx.wallet.update({
         where: { userId: body.userId },
         data: {
           balance: { increment: body.amount },
-          available: { increment: body.amount },
+          withdrawable: { increment: body.amount },
           totalEarned: { increment: body.amount },
           earnedToday: { increment: body.amount },
           earnedThisWeek: { increment: body.amount },

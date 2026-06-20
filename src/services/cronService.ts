@@ -44,12 +44,12 @@ export async function runDailyEarnings(force = false) {
 
     try {
       await prisma.$transaction(async (tx) => {
+        // Daily earning is income -> withdrawable. Principal stays locked forever.
         await tx.wallet.update({
           where: { userId: userPlan.userId },
           data: {
             balance: { increment: dailyEarning },
-            available: { increment: dailyEarning },
-            locked: { decrement: dailyEarning },
+            withdrawable: { increment: dailyEarning },
             totalEarned: { increment: dailyEarning },
             earnedToday: { increment: dailyEarning },
             earnedThisWeek: { increment: dailyEarning },
@@ -66,23 +66,15 @@ export async function runDailyEarnings(force = false) {
           },
         });
 
+        // At duration end, earnings stop and plan completes.
+        // Principal is NOT released — it stays locked permanently.
         if (newDays >= userPlan.plan.duration) {
-          const remainingLocked = Math.max(0, wallet.locked - dailyEarning);
-          await tx.wallet.update({
-            where: { userId: userPlan.userId },
-            data: {
-              balance: { increment: remainingLocked },
-              available: { increment: remainingLocked },
-              locked: { set: 0 },
-            },
-          });
-
           await tx.userPlan.update({
             where: { id: userPlan.id },
             data: { daysCompleted: newDays, status: 'COMPLETED' },
           });
 
-          console.log(`[Cron] Plan completed for user ${userPlan.userId}`);
+          console.log(`[Cron] Plan completed for user ${userPlan.userId} (principal stays locked)`);
         } else {
           await tx.userPlan.update({
             where: { id: userPlan.id },

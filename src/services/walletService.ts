@@ -9,11 +9,12 @@ export async function creditWallet(
   tx?: Parameters<Parameters<PrismaClient['$transaction']>[0]>[0]
 ) {
   const client = (tx || prisma) as PrismaClient;
+  // Income (referral / spin / daily) lands in `withdrawable` — the only withdrawable bucket.
   await client.wallet.update({
     where: { userId },
     data: {
       balance: { increment: amount },
-      available: { increment: amount },
+      withdrawable: { increment: amount },
       totalEarned: { increment: amount },
       earnedToday: { increment: amount },
       earnedThisWeek: { increment: amount },
@@ -37,10 +38,10 @@ export async function debitWallet(
   const client = (tx || prisma) as PrismaClient;
 
   const updated = await client.wallet.updateMany({
-    where: { userId, available: { gte: amount } },
+    where: { userId, withdrawable: { gte: amount } },
     data: {
       balance: { decrement: amount },
-      available: { decrement: amount },
+      withdrawable: { decrement: amount },
     },
   });
 
@@ -60,10 +61,11 @@ export async function lockFunds(
   tx?: Parameters<Parameters<PrismaClient['$transaction']>[0]>[0]
 ) {
   const client = (tx || prisma) as PrismaClient;
+  // Move deposit funds available -> locked. Principal stays locked permanently.
+  // balance unchanged (invariant: balance = available + withdrawable + locked).
   await client.wallet.update({
     where: { userId },
     data: {
-      balance: { decrement: amount },
       available: { decrement: amount },
       locked: { increment: amount },
     },

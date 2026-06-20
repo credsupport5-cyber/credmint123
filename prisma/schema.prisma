@@ -53,6 +53,7 @@ model Wallet {
   balance        Float    @default(0)
   locked         Float    @default(0)
   available      Float    @default(0)
+  withdrawable   Float    @default(0)
   earnedToday    Float    @default(0)
   earnedThisWeek Float    @default(0)
   totalEarned    Float    @default(0)
