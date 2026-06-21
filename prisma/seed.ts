@@ -121,7 +121,7 @@ async function main() {
     create: {
       userId: sunny.id,
       balance: 100,
-      available: 100,
+      deposits: 100,
       totalEarned: 100,
     },
   });
@@ -149,7 +149,8 @@ async function main() {
     update: {
       balance: 4285,
       locked: 1000,
-      available: 3285,
+      deposits: 3035,
+      withdrawable: 250,
       earnedToday: 50,
       earnedThisWeek: 350,
       totalEarned: 250,
@@ -158,7 +159,8 @@ async function main() {
       userId: admin.id,
       balance: 4285,
       locked: 1000,
-      available: 3285,
+      deposits: 3035,
+      withdrawable: 250,
       earnedToday: 50,
       earnedThisWeek: 350,
       totalEarned: 250,
@@ -288,7 +290,7 @@ async function main() {
       where: { userId: sunny.id },
       data: {
         balance:     { increment: 100 },
-        available:   { increment: 100 },
+        withdrawable: { increment: 100 },
         totalEarned: { increment: 100 },
       },
     });

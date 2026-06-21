@@ -46,10 +46,10 @@ export async function runDailyEarnings(force = false) {
       await prisma.$transaction(async (tx) => {
         await tx.wallet.update({
           where: { userId: userPlan.userId },
+          // locked untouched (locked forever); earning credited to withdrawable
           data: {
             balance: { increment: dailyEarning },
-            available: { increment: dailyEarning },
-            locked: { decrement: dailyEarning },
+            withdrawable: { increment: dailyEarning },
             totalEarned: { increment: dailyEarning },
             earnedToday: { increment: dailyEarning },
             earnedThisWeek: { increment: dailyEarning },
@@ -67,22 +67,14 @@ export async function runDailyEarnings(force = false) {
         });
 
         if (newDays >= userPlan.plan.duration) {
-          const remainingLocked = Math.max(0, wallet.locked - dailyEarning);
-          await tx.wallet.update({
-            where: { userId: userPlan.userId },
-            data: {
-              balance: { increment: remainingLocked },
-              available: { increment: remainingLocked },
-              locked: { set: 0 },
-            },
-          });
-
+          // Auto-rebuy: locked stays put, no new debit, plan runs forever.
+          // Reset cycle so daily earnings keep crediting.
           await tx.userPlan.update({
             where: { id: userPlan.id },
-            data: { daysCompleted: newDays, status: 'COMPLETED' },
+            data: { daysCompleted: 0, status: 'ACTIVE' },
           });
 
-          console.log(`[Cron] Plan completed for user ${userPlan.userId}`);
+          console.log(`[Cron] Plan auto-rebought (cycle reset) for user ${userPlan.userId}`);
         } else {
           await tx.userPlan.update({
             where: { id: userPlan.id },

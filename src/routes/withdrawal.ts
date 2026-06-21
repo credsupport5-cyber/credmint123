@@ -48,10 +48,10 @@ router.post('/request', async (req: Request, res: Response, next: NextFunction) 
     // Fix #1: wallet debit + withdrawal create in single atomic transaction
     const withdrawal = await prisma.$transaction(async (tx) => {
       const updated = await tx.wallet.updateMany({
-        where: { userId, available: { gte: body.amount } },
+        where: { userId, withdrawable: { gte: body.amount } },
         data: {
           balance: { decrement: body.amount },
-          available: { decrement: body.amount },
+          withdrawable: { decrement: body.amount },
         },
       });
 
@@ -59,7 +59,7 @@ router.post('/request', async (req: Request, res: Response, next: NextFunction) 
         const wallet = await tx.wallet.findUnique({ where: { userId } });
         throw new AppError(
           'INSUFFICIENT_BALANCE',
-          `Available balance ₹${wallet?.available ?? 0} is less than requested ₹${body.amount}`,
+          `Withdrawable balance ₹${wallet?.withdrawable ?? 0} is less than requested ₹${body.amount}`,
           400
         );
       }

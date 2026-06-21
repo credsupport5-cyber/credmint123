@@ -96,7 +96,8 @@ router.get('/getUserDetails', async (req: Request, res: Response, next: NextFunc
         ? {
             balance: wallet.balance,
             locked: wallet.locked,
-            available: wallet.available,
+            deposits: wallet.deposits,
+            withdrawable: wallet.withdrawable,
             earnedToday: wallet.earnedToday,
             earnedThisWeek: wallet.earnedThisWeek,
             totalEarned: wallet.totalEarned,

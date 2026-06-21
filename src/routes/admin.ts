@@ -224,9 +224,10 @@ router.post('/payment/:id/verify', async (req: Request, res: Response, next: Nex
 
         await tx.wallet.update({
           where: { userId: submission.userId },
+          // deposit lands in deposits bucket (spendable on plans, NOT withdrawable)
           data: {
             balance: { increment: inrAmount },
-            available: { increment: inrAmount },
+            deposits: { increment: inrAmount },
           },
         });
 
@@ -450,9 +451,10 @@ router.post('/withdrawal/:id/reject', async (req: Request, res: Response, next: 
 
       await tx.wallet.update({
         where: { userId: withdrawal.userId },
+        // refund a rejected withdrawal back to withdrawable (where it came from)
         data: {
           balance: { increment: withdrawal.amount },
-          available: { increment: withdrawal.amount },
+          withdrawable: { increment: withdrawal.amount },
         },
       });
 
@@ -504,7 +506,7 @@ router.post('/addDiscountsToUser', async (req: Request, res: Response, next: Nex
         where: { userId: body.userId },
         data: {
           balance: { increment: body.amount },
-          available: { increment: body.amount },
+          withdrawable: { increment: body.amount },
           totalEarned: { increment: body.amount },
           earnedToday: { increment: body.amount },
           earnedThisWeek: { increment: body.amount },

@@ -11,9 +11,10 @@ export async function creditWallet(
   const client = (tx || prisma) as PrismaClient;
   await client.wallet.update({
     where: { userId },
+    // income: credited to withdrawable; totalEarned = lifetime stat
     data: {
       balance: { increment: amount },
-      available: { increment: amount },
+      withdrawable: { increment: amount },
       totalEarned: { increment: amount },
       earnedToday: { increment: amount },
       earnedThisWeek: { increment: amount },
@@ -37,10 +38,10 @@ export async function debitWallet(
   const client = (tx || prisma) as PrismaClient;
 
   const updated = await client.wallet.updateMany({
-    where: { userId, available: { gte: amount } },
+    where: { userId, withdrawable: { gte: amount } },
     data: {
       balance: { decrement: amount },
-      available: { decrement: amount },
+      withdrawable: { decrement: amount },
     },
   });
 
@@ -60,11 +61,11 @@ export async function lockFunds(
   tx?: Parameters<Parameters<PrismaClient['$transaction']>[0]>[0]
 ) {
   const client = (tx || prisma) as PrismaClient;
+  // balance unchanged: principal moves deposits -> locked (locked forever)
   await client.wallet.update({
     where: { userId },
     data: {
-      balance: { decrement: amount },
-      available: { decrement: amount },
+      deposits: { decrement: amount },
       locked: { increment: amount },
     },
   });

@@ -10,6 +10,7 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:seed": "ts-node prisma/seed.ts",
+    "db:migrate-wallets": "ts-node prisma/migrateWallets.ts",
     "db:studio": "prisma studio",
     "generate": "prisma generate"
   },

@@ -16,7 +16,8 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
       select: {
         balance: true,
         locked: true,
-        available: true,
+        deposits: true,
+        withdrawable: true,
         earnedToday: true,
         earnedThisWeek: true,
         totalEarned: true,

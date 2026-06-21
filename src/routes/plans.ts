@@ -88,11 +88,11 @@ router.post('/:planId/buy', async (req: Request, res: Response, next: NextFuncti
 
     const result = await prisma.$transaction(async (tx) => {
       // Fix #5: re-check balance atomically inside tx with WHERE guard
+      // balance unchanged: principal moves deposits -> locked (locked forever)
       const walletUpdate = await tx.wallet.updateMany({
-        where: { userId, available: { gte: plan.price } },
+        where: { userId, deposits: { gte: plan.price } },
         data: {
-          balance: { decrement: plan.price },
-          available: { decrement: plan.price },
+          deposits: { decrement: plan.price },
           locked: { increment: plan.price },
         },
       });
@@ -101,7 +101,7 @@ router.post('/:planId/buy', async (req: Request, res: Response, next: NextFuncti
         const wallet = await tx.wallet.findUnique({ where: { userId } });
         throw new AppError(
           'INSUFFICIENT_BALANCE',
-          `Available balance ₹${wallet?.available ?? 0} is less than plan price ₹${plan.price}`,
+          `Deposit balance ₹${wallet?.deposits ?? 0} is less than plan price ₹${plan.price}`,
           400
         );
       }
@@ -125,7 +125,7 @@ router.post('/:planId/buy', async (req: Request, res: Response, next: NextFuncti
           where: { userId: ref.id },
           data: {
             balance: { increment: ref.earning },
-            available: { increment: ref.earning },
+            withdrawable: { increment: ref.earning },
             totalEarned: { increment: ref.earning },
             earnedToday: { increment: ref.earning },
             earnedThisWeek: { increment: ref.earning },
