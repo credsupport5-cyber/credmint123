@@ -1,13 +1,14 @@
-const COINGECKO_URL =
-  'https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=inr';
-
 const PLATFORM_FEE = 0.05;
+const DEFAULT_USDT_INR_RATE = 95;
 
 export async function fetchUsdtInrRate(): Promise<number> {
-  const res = await fetch(COINGECKO_URL);
-  if (!res.ok) throw new Error(`CoinGecko API error: ${res.status}`);
-  const data = (await res.json()) as { tether: { inr: number } };
-  return data.tether.inr;
+  const configuredRate = Number(process.env.USDT_INR_RATE ?? DEFAULT_USDT_INR_RATE);
+
+  if (!Number.isFinite(configuredRate) || configuredRate <= 0) {
+    throw new Error('Invalid USDT_INR_RATE configuration');
+  }
+
+  return configuredRate;
 }
 
 export function applyPlatformFee(usdtAmount: number, rate: number): number {
