@@ -12,6 +12,9 @@ const SPIN_PRIZES: Record<string, number[]> = {
   diamond_1: [100, 100, 50, 50, 50],
   diamond_2: [100, 100, 100, 100, 50],
   diamond_3: [100, 100, 100, 100, 100],
+  platinum_1: [250, 250, 250, 250, 250],
+  platinum_2: [500, 500, 500, 250, 125],
+  platinum_3: [500, 500, 500, 500, 500],
 };
 
 type Prize = { label: string; value: number; isTryAgain: boolean };

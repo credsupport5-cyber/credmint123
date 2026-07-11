@@ -71,12 +71,24 @@ async function main() {
       duration: 20, color: '#60A5FA', badge: 'Best Value', upcoming: false,
       description: '₹21,999 → ₹43,998 in 20 days. Earn ₹1,100/day.',
     },
-    // Platinum (upcoming)
+    // Platinum
     {
-      id: 'platinum_1', name: 'Platinum Plan', tier: 'PLATINUM' as const, level: 1,
-      price: 0, dailyEarning: 0, spinAmounts: [], spinTotal: 0, totalDailyEarning: 0,
-      duration: 20, color: '#A78BFA', upcoming: true,
-      description: 'Exclusive high-yield plan — launching soon',
+      id: 'platinum_1', name: 'Platinum Level 1', tier: 'PLATINUM' as const, level: 1,
+      price: 50000, dailyEarning: 1250, spinAmounts: [250, 250, 250, 250, 250], spinTotal: 1250, totalDailyEarning: 2500,
+      duration: 20, color: '#A78BFA', badge: 'Best Value', upcoming: false,
+      description: '₹50,000 → ₹100,000 in 20 days. Earn ₹2,500/day.',
+    },
+    {
+      id: 'platinum_2', name: 'Platinum Level 2', tier: 'PLATINUM' as const, level: 2,
+      price: 75000, dailyEarning: 1875, spinAmounts: [500, 500, 500, 250, 125], spinTotal: 1875, totalDailyEarning: 3750,
+      duration: 20, color: '#A78BFA', badge: 'Best Value', upcoming: false,
+      description: '₹75,000 → ₹150,000 in 20 days. Earn ₹3,750/day.',
+    },
+    {
+      id: 'platinum_3', name: 'Platinum Level 3', tier: 'PLATINUM' as const, level: 3,
+      price: 100000, dailyEarning: 2500, spinAmounts: [500, 500, 500, 500, 500], spinTotal: 2500, totalDailyEarning: 5000,
+      duration: 20, color: '#A78BFA', badge: 'Best Value', upcoming: false,
+      description: '₹100,000 → ₹200,000 in 20 days. Earn ₹5,000/day.',
     },
   ];
 
