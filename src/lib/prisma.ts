@@ -2,19 +2,39 @@ import { PrismaClient } from '@prisma/client';
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 
+const READ_ACTIONS = new Set([
+  'findUnique',
+  'findUniqueOrThrow',
+  'findFirst',
+  'findFirstOrThrow',
+  'findMany',
+  'count',
+  'aggregate',
+  'groupBy',
+  'queryRaw',
+]);
+
+export function isTransientDatabaseError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes('E57P01')
+    || message.includes('terminating connection')
+    || message.includes('Connection pool timeout');
+}
+
 function makePrisma() {
   const client = new PrismaClient({
-    log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
+    // Prisma logs every connection Neon closes during scale-to-zero. Production
+    // request/error handling below records failures once instead of once per pool slot.
+    log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : [],
   });
 
-  // Re-connect transparently after E57P01 (admin_shutdown) or similar transient kills
+  // Neon can close idle connections when its compute suspends. Retry only read
+  // operations once: retrying a write could duplicate a completed financial action.
   client.$use(async (params, next) => {
     try {
       return await next(params);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      // Retry once on connection-terminated errors
-      if (msg.includes('E57P01') || msg.includes('terminating connection') || msg.includes('Connection pool timeout')) {
+      if (READ_ACTIONS.has(params.action) && isTransientDatabaseError(err)) {
         await client.$connect();
         return await next(params);
       }

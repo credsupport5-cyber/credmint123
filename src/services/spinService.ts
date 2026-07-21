@@ -145,12 +145,15 @@ export async function batchPerformSpins(prisma: PrismaClient, userId: string, co
       );
     }
 
+    const spinLogs = [];
     for (let i = 0; i < count; i++) {
       const prize = prizeAtIndex(status.planId, spinsNow + i);
-      await tx.spinLog.create({ data: { userId, prize: prize.label, value: prize.value } });
+      spinLogs.push({ userId, prize: prize.label, value: prize.value });
       totalWon += prize.value;
       results.push(prize);
     }
+
+    await tx.spinLog.createMany({ data: spinLogs });
 
     if (totalWon > 0) {
       await creditWallet(

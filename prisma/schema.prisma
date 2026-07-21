@@ -1,6 +1,7 @@
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 generator client {
@@ -33,6 +34,9 @@ model User {
   referralsReceived  Referral[]    @relation("RefereeReferrals")
   refreshTokens      RefreshToken[]
   supportTickets     SupportTicket[]
+
+  @@index([referredById, createdAt(sort: Desc)])
+  @@index([kycStatus, createdAt(sort: Desc)])
 }
 
 enum KycStatus {
@@ -96,6 +100,9 @@ model UserPlan {
   lockedAmount  Float
   status        PlanStatus @default(ACTIVE)
   createdAt     DateTime   @default(now())
+
+  @@index([userId, status, startDate(sort: Desc)])
+  @@index([status])
 }
 
 enum PlanStatus {
@@ -114,6 +121,9 @@ model Transaction {
   description String
   status      TxnStatus @default(COMPLETED)
   createdAt   DateTime  @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, type, createdAt(sort: Desc)])
 }
 
 enum TxnType {
@@ -157,6 +167,9 @@ model PaymentSubmission {
   status        SubmissionStatus @default(PENDING)
   createdAt     DateTime         @default(now())
   verifiedAt    DateTime?
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
 }
 
 enum SubmissionStatus {
@@ -178,6 +191,9 @@ model WithdrawalRequest {
   status        WithdrawalStatus   @default(PENDING)
   createdAt     DateTime           @default(now())
   completedAt   DateTime?
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
 }
 
 enum WithdrawalMethod {
@@ -199,6 +215,8 @@ model SpinLog {
   prize     String
   value     Float
   createdAt DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
 }
 
 model Referral {
@@ -211,6 +229,9 @@ model Referral {
   referrer      User     @relation("ReferrerReferrals", fields: [referrerId], references: [id])
   referee       User     @relation("RefereeReferrals", fields: [refereeId], references: [id])
   createdAt     DateTime @default(now())
+
+  @@index([referrerId, createdAt(sort: Desc)])
+  @@index([referrerId, level])
 }
 
 model RefreshToken {
@@ -220,6 +241,8 @@ model RefreshToken {
   token     String   @unique
   expiresAt DateTime
   createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model SupportTicket {

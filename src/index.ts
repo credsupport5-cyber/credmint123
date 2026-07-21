@@ -29,6 +29,26 @@ app.use(cors({ origin: '*', credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Enable temporarily in production to identify routes that keep Neon awake.
+// No body, authorization header, query string, or database data is logged.
+if (process.env.REQUEST_LOGS !== 'false') {
+  app.use((req, res, next) => {
+    const startedAt = process.hrtime.bigint();
+    res.on('finish', () => {
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+      console.log(JSON.stringify({
+        event: 'http_request',
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        durationMs: Math.round(durationMs),
+        clientIp: req.ip,
+      }));
+    });
+    next();
+  });
+}
+
 // Health check
 app.get('/health', (_, res) => res.json({ status: 'ok', ts: new Date().toISOString() }));
 

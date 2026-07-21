@@ -3,5 +3,4 @@ dist/
 .env
 .env.production
 *.env.local
-prisma/migrations/
 .claude/

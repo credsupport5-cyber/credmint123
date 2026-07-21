@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { AppError } from '../lib/errors';
+import { isTransientDatabaseError } from '../lib/prisma';
 import { ZodError } from 'zod';
 
 export function errorHandler(
@@ -22,6 +23,18 @@ export function errorHandler(
       error: 'VALIDATION_ERROR',
       message: err.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join(', '),
       statusCode: 400,
+    });
+    return;
+  }
+
+  // Writes are deliberately not retried automatically. A connection can die
+  // after Postgres commits, and replaying a financial mutation could duplicate it.
+  if (isTransientDatabaseError(err)) {
+    console.warn('[DB_UNAVAILABLE]', { method: req.method, path: req.path });
+    res.set('Retry-After', '1').status(503).json({
+      error: 'DATABASE_UNAVAILABLE',
+      message: 'Database is reconnecting. Retry this request shortly.',
+      statusCode: 503,
     });
     return;
   }
